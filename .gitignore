@@ -1,0 +1,9 @@
+.venv/
+build/
+*.so
+*.o
+__pycache__/
+*.egg-info/
+.pytest_cache/
+dist/
+# Note: uv.lock is intentionally NOT ignored — commit it for reproducible envs.
