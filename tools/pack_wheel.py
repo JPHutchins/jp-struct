@@ -25,6 +25,8 @@ class Metadata(NamedTuple):
     summary: str
     requires_python: str
     authors: tuple[str, ...]
+    license_expression: str
+    license_files: tuple[Path, ...]
     readme: str
     readme_content_type: str
 
@@ -39,12 +41,14 @@ class Metadata(NamedTuple):
     def core_metadata(self) -> str:
         return "\n".join(
             (
-                "Metadata-Version: 2.1",
+                "Metadata-Version: 2.4",
                 f"Name: {self.name}",
                 f"Version: {self.version}",
                 f"Summary: {self.summary}",
                 *(f"Author-email: {author}" for author in self.authors),
                 f"Requires-Python: {self.requires_python}",
+                f"License-Expression: {self.license_expression}",
+                *(f"License-File: {path.name}" for path in self.license_files),
                 f"Description-Content-Type: {self.readme_content_type}",
                 "",
                 self.readme,
@@ -71,6 +75,8 @@ def read_metadata(pyproject: Path) -> Metadata:
         summary=project["description"],
         requires_python=project["requires-python"],
         authors=tuple(author["email"] for author in project.get("authors", []) if "email" in author),
+        license_expression=project["license"],
+        license_files=tuple(pyproject.parent / name for name in project.get("license-files", ())),
         readme=readme.read_text(),
         readme_content_type="text/markdown" if readme.suffix == ".md" else "text/plain",
     )
@@ -101,6 +107,9 @@ def build_entries(metadata: Metadata, tag: str, module: Entry) -> Iterator[Entry
     yield module
     yield Entry(f"{metadata.dist_info}/METADATA", metadata.core_metadata().encode())
     yield Entry(f"{metadata.dist_info}/WHEEL", wheel_metadata(tag).encode())
+
+    for path in metadata.license_files:
+        yield Entry(f"{metadata.dist_info}/licenses/{path.name}", path.read_bytes())
 
 
 def write_wheel(destination: Path, entries: tuple[Entry, ...], record_path: str) -> None:

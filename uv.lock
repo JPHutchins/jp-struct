@@ -380,7 +380,7 @@ dev = [
     { name = "msgspec", specifier = ">=0.21" },
     { name = "pytest", specifier = ">=8" },
     { name = "record-type", marker = "python_full_version >= '3.11'", specifier = ">=2023.1.post1" },
-    { name = "setuptools", specifier = ">=70" },
+    { name = "setuptools", specifier = ">=77" },
 ]
 
 [[package]]

@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=70", "tomli>=2; python_version<'3.11'"]
+requires = ["setuptools>=77", "tomli>=2; python_version<'3.11'"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -9,16 +9,16 @@ description = "A C-backed, inheritable Record/Struct base class for Python — f
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [{ name = "JP Hutchins", email = "jp@intercreate.io" }]
+license = "MIT"
+license-files = ["LICENSE"]
 
 # The importable module is `record` (from record import Record); the C source
 # is wired up in setup.py because setuptools does not yet support declaring
 # ext_modules in pyproject.toml.
 
 [dependency-groups]
-# Everything needed to build, test, and benchmark. `make` installs these into
-# .venv via `uv sync --no-install-project`.
 dev = [
-    "setuptools>=70",            # build_ext
+    "setuptools>=77",            # build_ext
     "pytest>=8",                 # tests
     "msgspec>=0.21",             # bench: comparison target
     # bench: comparison target (the `records` module); it floors at 3.11, which

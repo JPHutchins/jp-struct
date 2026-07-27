@@ -42,6 +42,7 @@
           ./tools/pack_wheel.py
           ./pyproject.toml
           ./README.md
+          ./LICENSE
         ];
       };
 
