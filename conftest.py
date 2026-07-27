@@ -1,17 +1,17 @@
 """Make the in-place-built `record` extension importable during tests.
 
-`uv run camas build` (build_ext --inplace) drops `record.*.so` under src/ rather than
-installing the package, so we prepend src/ (and the repo root, as a fallback) to
-sys.path here. pytest imports this conftest before collecting tests, so
-`import record` works without an install.
+`build_ext --inplace` drops `record.*.so` under src/ rather than installing it,
+so src/ goes on the path -- but only when nothing already provides `record`, so
+that a run against an installed wheel is never silently shadowed by a stale
+local build.
 """
 
+import importlib.util
 import sys
 from pathlib import Path
 
-# `build_ext --inplace` lands record.*.so under src/ (src-layout) or the repo
-# root depending on setuptools config; put both on the path so import works
-# either way without installing the package.
-_root = Path(__file__).parent
-for _d in (_root / "src", _root):
-    sys.path.insert(0, str(_d))
+if importlib.util.find_spec("record") is None:
+    _root = Path(__file__).parent
+
+    for _directory in (_root / "src", _root):
+        sys.path.insert(0, str(_directory))

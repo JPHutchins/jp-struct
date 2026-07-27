@@ -20,7 +20,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: DeterminateSystems/nix-installer-action@main
-      - run: nix develop --command uv run camas ci
+      - run: nix develop --command uv sync --no-install-project
+      - run: nix develop --command uv run --no-sync camas ci
       - run: nix build .#default --out-link result-wheels
       - uses: actions/upload-artifact@v4
         with:
@@ -29,7 +30,7 @@ jobs:
           if-no-files-found: error
       - id: emit
         run: |
-          matrix=$(nix develop --command uv run camas coverage --github-matrix=variants)
+          matrix=$(nix develop --command uv run --no-sync camas coverage --github-matrix=variants)
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
 
   # Installs the wheel that was just built rather than compiling: it is what
@@ -47,4 +48,8 @@ jobs:
         with:
           name: wheels
           path: result-wheels
-      - run: uv run camas coverage --OS ${{ matrix.OS }} --PY ${{ matrix.PY }}
+      # --no-install-project, because installing it means compiling it, and on
+      # Windows that is MSVC, which cannot build this source. The leg only needs
+      # camas; the wheel goes into an isolated environment the task creates.
+      - run: uv sync --no-install-project
+      - run: uv run --no-sync camas coverage --OS ${{ matrix.OS }} --PY ${{ matrix.PY }}
