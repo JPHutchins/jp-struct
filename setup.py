@@ -15,10 +15,9 @@ setup(
         Extension(
             "record",
             ["src/record.c"],
-            # Strict-ish by default; add "-Werror"/"-Wdouble-promotion" when you
-            # harden. Python's headers are not always -Wextra-clean across
-            # compilers, so -Werror is left off the baseline on purpose.
-            extra_compile_args=["-O2", "-Wall", "-Wextra"],
+            # -Wno-unused-parameter: CPython slot signatures are fixed by the
+            # API and routinely ignore an argument.
+            extra_compile_args=["-std=c2x", "-O2", "-Werror", "-Wdouble-promotion", "-Wall", "-Wextra", "-Wno-unused-parameter"],
         )
     ],
 )
