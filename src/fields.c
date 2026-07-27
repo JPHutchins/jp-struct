@@ -3,6 +3,7 @@
 
 #include "annotations.h"
 #include "fields.h"
+#include "owned.h"
 #include "result.h"
 #include "types.h"
 
@@ -23,23 +24,20 @@ static PyObject * build_defaults(PyObject * all_names, PyObject * default_by_nam
 static PyObject * checked_annotations(PyObject * namespace);
 static bool inherits_field(RecordType const * base, PyObject * field_name);
 
-/*
- * One allocation path, one release path: the three working collections are
- * dropped unconditionally on the way out and the plan only takes references
- * once every step has succeeded.
- */
+/* The plan only takes references once every step has succeeded; the working
+ * collections belong to this scope either way. */
 struct field_plan field_plan_build(RecordType const * const base, PyObject * const namespace) {
 	struct field_plan plan = {0};
 
-	PyObject * const annotations = checked_annotations(namespace);
+	PY_OWN(annotations, checked_annotations(namespace));
 
 	if (annotations == NULL) {
 		return plan;
 	}
 
-	PyObject * const all_names = PyList_New(0);
-	PyObject * const new_names = PyList_New(0);
-	PyObject * const default_by_name = PyDict_New();
+	PY_OWN(all_names, PyList_New(0));
+	PY_OWN(new_names, PyList_New(0));
+	PY_OWN(default_by_name, PyDict_New());
 
 	if (all_names != NULL
 		&& new_names != NULL
@@ -49,15 +47,10 @@ struct field_plan field_plan_build(RecordType const * const base, PyObject * con
 		plan.defaults = build_defaults(all_names, default_by_name);
 
 		if (plan.defaults != NULL) {
-			plan.all_names = Py_NewRef(all_names);
-			plan.new_names = Py_NewRef(new_names);
+			plan.all_names = py_steal(&all_names);
+			plan.new_names = py_steal(&new_names);
 		}
 	}
-
-	Py_XDECREF(all_names);
-	Py_XDECREF(new_names);
-	Py_XDECREF(default_by_name);
-	Py_DECREF(annotations);
 
 	return plan;
 }
@@ -69,14 +62,13 @@ void field_plan_clear(struct field_plan * const plan) {
 }
 
 static PyObject * checked_annotations(PyObject * const namespace) {
-	PyObject * const annotations = record_annotations(namespace);
+	PY_OWN(annotations, record_annotations(namespace));
 
 	if (annotations == NULL || PyDict_Check(annotations)) {
-		return annotations;
+		return py_steal(&annotations);
 	}
 
 	PyErr_SetString(PyExc_TypeError, "__annotations__ must be a dict");
-	Py_DECREF(annotations);
 
 	return NULL;
 }
