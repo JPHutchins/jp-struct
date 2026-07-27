@@ -4,6 +4,7 @@
 #include "construct.h"
 #include "fields.h"
 #include "meta.h"
+#include "owned.h"
 #include "result.h"
 #include "types.h"
 
@@ -99,12 +100,9 @@ PyObject * RecordMeta_new(
 		return NULL;
 	}
 
-	PyObject * const namespace =
-		build_class_namespace(original_namespace, plan.all_names, plan.new_names);
+	PY_OWNED(namespace, build_class_namespace(original_namespace, plan.all_names, plan.new_names));
 	RecordType * record_class =
 		namespace != NULL ? create_class(metatype, name, bases, namespace) : NULL;
-
-	Py_XDECREF(namespace);
 
 	if (record_class != NULL && install_fields(record_class, base, &plan) != RESULT_OK) {
 		Py_CLEAR(record_class);
@@ -137,9 +135,9 @@ static PyObject * build_class_namespace(
 	PyObject * const all_names,
 	PyObject * const new_names
 ) {
-	PyObject * const slots = PyList_AsTuple(new_names);
-	PyObject * const match_args = PyList_AsTuple(all_names);
-	PyObject * const namespace = PyDict_Copy(original_namespace);
+	PY_OWNED(slots, PyList_AsTuple(new_names));
+	PY_OWNED(match_args, PyList_AsTuple(all_names));
+	PY_MOVABLE(namespace, PyDict_Copy(original_namespace));
 
 	if (slots != NULL
 		&& match_args != NULL
@@ -147,15 +145,8 @@ static PyObject * build_class_namespace(
 		&& drop_class_variables(namespace, new_names) == RESULT_OK
 		&& PyDict_SetItemString(namespace, "__slots__", slots) == 0
 		&& PyDict_SetItemString(namespace, "__match_args__", match_args) == 0) {
-		Py_DECREF(slots);
-		Py_DECREF(match_args);
-
-		return namespace;
+		return py_move(&namespace);
 	}
-
-	Py_XDECREF(slots);
-	Py_XDECREF(match_args);
-	Py_XDECREF(namespace);
 
 	return NULL;
 }
@@ -181,16 +172,13 @@ static RecordType * create_class(
 	PyObject * const bases,
 	PyObject * const namespace
 ) {
-	PyObject * const type_args = PyTuple_Pack(3, name, bases, namespace);
+	PY_OWNED(type_args, PyTuple_Pack(3, name, bases, namespace));
 
 	if (type_args == NULL) {
 		return NULL;
 	}
 
-	PyObject * const record_class = PyType_Type.tp_new(metatype, type_args, NULL);
-	Py_DECREF(type_args);
-
-	return (RecordType *) record_class;
+	return (RecordType *) PyType_Type.tp_new(metatype, type_args, NULL);
 }
 
 /* The type exists but is not yet a record; this is what makes it one. */
@@ -199,25 +187,24 @@ static enum result install_fields(
 	RecordType const * const base,
 	struct field_plan const * const plan
 ) {
-	PyObject * const field_names = PyList_AsTuple(plan->all_names);
+	PY_MOVABLE(field_names, PyList_AsTuple(plan->all_names));
 
 	if (field_names == NULL) {
 		return RESULT_ERROR;
 	}
 
+	Py_ssize_t const field_count = PyTuple_GET_SIZE(field_names);
 	Py_ssize_t * const offsets =
-		resolve_slot_offsets(record_class, base, plan->new_names, PyTuple_GET_SIZE(field_names));
+		resolve_slot_offsets(record_class, base, plan->new_names, field_count);
 
 	if (offsets == NULL) {
-		Py_DECREF(field_names);
-
 		return RESULT_ERROR;
 	}
 
-	record_class->record_field_names = field_names;
+	record_class->record_field_names = py_move(&field_names);
 	record_class->record_defaults = Py_NewRef(plan->defaults);
 	record_class->record_slot_offsets = offsets;
-	record_class->record_field_count = PyTuple_GET_SIZE(field_names);
+	record_class->record_field_count = field_count;
 	record_class->record_default_count = PyTuple_GET_SIZE(plan->defaults);
 	record_class->heap_type.ht_type.tp_vectorcall = Record_vectorcall;
 

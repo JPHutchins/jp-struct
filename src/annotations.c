@@ -1,6 +1,7 @@
 #include <Python.h>
 
 #include "annotations.h"
+#include "owned.h"
 
 /* annotationlib.Format.FORWARDREF: never raises NameError on an unresolved
  * bare forward reference, which is all we need since we only read the field
@@ -48,14 +49,11 @@ static PyObject * borrow_annotate(PyObject * const namespace) {
 }
 
 static PyObject * evaluate(PyObject * const annotate, enum annotation_format const format) {
-	PyObject * const argument = PyLong_FromLong(format);
+	PY_OWNED(argument, PyLong_FromLong(format));
 
 	if (argument == NULL) {
 		return NULL;
 	}
 
-	PyObject * const annotations = PyObject_CallOneArg(annotate, argument);
-	Py_DECREF(argument);
-
-	return annotations;
+	return PyObject_CallOneArg(annotate, argument);
 }

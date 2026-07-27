@@ -29,15 +29,15 @@ static bool inherits_field(RecordType const * base, PyObject * field_name);
 struct field_plan field_plan_build(RecordType const * const base, PyObject * const namespace) {
 	struct field_plan plan = {0};
 
-	PY_OWN(annotations, checked_annotations(namespace));
+	PY_OWNED(annotations, checked_annotations(namespace));
 
 	if (annotations == NULL) {
 		return plan;
 	}
 
-	PY_OWN(all_names, PyList_New(0));
-	PY_OWN(new_names, PyList_New(0));
-	PY_OWN(default_by_name, PyDict_New());
+	PY_MOVABLE(all_names, PyList_New(0));
+	PY_MOVABLE(new_names, PyList_New(0));
+	PY_OWNED(default_by_name, PyDict_New());
 
 	if (all_names != NULL
 		&& new_names != NULL
@@ -47,8 +47,8 @@ struct field_plan field_plan_build(RecordType const * const base, PyObject * con
 		plan.defaults = build_defaults(all_names, default_by_name);
 
 		if (plan.defaults != NULL) {
-			plan.all_names = py_steal(&all_names);
-			plan.new_names = py_steal(&new_names);
+			plan.all_names = py_move(&all_names);
+			plan.new_names = py_move(&new_names);
 		}
 	}
 
@@ -62,10 +62,10 @@ void field_plan_clear(struct field_plan * const plan) {
 }
 
 static PyObject * checked_annotations(PyObject * const namespace) {
-	PY_OWN(annotations, record_annotations(namespace));
+	PY_MOVABLE(annotations, record_annotations(namespace));
 
 	if (annotations == NULL || PyDict_Check(annotations)) {
-		return py_steal(&annotations);
+		return py_move(&annotations);
 	}
 
 	PyErr_SetString(PyExc_TypeError, "__annotations__ must be a dict");

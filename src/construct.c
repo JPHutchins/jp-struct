@@ -1,6 +1,7 @@
 #include <Python.h>
 
 #include "construct.h"
+#include "owned.h"
 #include "result.h"
 #include "types.h"
 
@@ -55,7 +56,8 @@ PyObject * Record_vectorcall(
 	}
 
 	PyTypeObject * const python_class = &type->heap_type.ht_type;
-	PyObject * const self = python_class->tp_alloc(python_class, 0);
+
+	PY_MOVABLE(self, python_class->tp_alloc(python_class, 0));
 
 	if (self == NULL) {
 		return NULL;
@@ -65,12 +67,10 @@ PyObject * Record_vectorcall(
 
 	if (bind_keywords(type, self, arguments, positional_count, keyword_names) != RESULT_OK
 		|| fill_defaults(type, self, positional_count) != RESULT_OK) {
-		Py_DECREF(self);
-
 		return NULL;
 	}
 
-	return self;
+	return py_move(&self);
 }
 
 /* Positional arguments are in field order by definition, so this is a copy. */

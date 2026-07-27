@@ -1,5 +1,6 @@
 #include <Python.h>
 
+#include "owned.h"
 #include "repr.h"
 #include "types.h"
 
@@ -17,22 +18,19 @@ PyObject * Record_repr(PyObject * const self) {
 		return recursive < 0 ? NULL : PyUnicode_FromString("...");
 	}
 
-	PyObject * const inner = fields_repr(record_type_of(self), self);
+	PY_OWNED(inner, fields_repr(record_type_of(self), self));
 	Py_ReprLeave(self);
 
 	if (inner == NULL) {
 		return NULL;
 	}
 
-	PyObject * const out = PyUnicode_FromFormat("%s(%U)", Py_TYPE(self)->tp_name, inner);
-	Py_DECREF(inner);
-
-	return out;
+	return PyUnicode_FromFormat("%s(%U)", Py_TYPE(self)->tp_name, inner);
 }
 
 /* The `x=1.0, y=2.0` interior, without the class name or the parentheses. */
 static PyObject * fields_repr(RecordType const * const type, PyObject * const self) {
-	PyObject * const pieces = PyList_New(type->record_field_count);
+	PY_OWNED(pieces, PyList_New(type->record_field_count));
 
 	if (pieces == NULL) {
 		return NULL;
@@ -42,21 +40,15 @@ static PyObject * fields_repr(RecordType const * const type, PyObject * const se
 		PyObject * const piece = field_repr(type, self, i);
 
 		if (piece == NULL) {
-			Py_DECREF(pieces);
-
 			return NULL;
 		}
 
 		PyList_SET_ITEM(pieces, i, piece);
 	}
 
-	PyObject * const separator = PyUnicode_FromString(", ");
-	PyObject * const joined = separator != NULL ? PyUnicode_Join(separator, pieces) : NULL;
+	PY_OWNED(separator, PyUnicode_FromString(", "));
 
-	Py_XDECREF(separator);
-	Py_DECREF(pieces);
-
-	return joined;
+	return separator != NULL ? PyUnicode_Join(separator, pieces) : NULL;
 }
 
 /* `name=value`, or `name=<unset>` for a slot nothing has written yet. */
@@ -66,18 +58,14 @@ static PyObject * field_repr(
 	Py_ssize_t const index
 ) {
 	PyObject * const value = *record_slot(type, self, index);
-	PyObject * const rendered = value != NULL
-		? PyObject_Repr(value)
-		: PyUnicode_FromString("<unset>");
+
+	PY_OWNED(rendered, value != NULL ? PyObject_Repr(value) : PyUnicode_FromString("<unset>"));
 
 	if (rendered == NULL) {
 		return NULL;
 	}
 
-	PyObject * const piece = PyUnicode_FromFormat(
+	return PyUnicode_FromFormat(
 		"%U=%U", PyTuple_GET_ITEM(type->record_field_names, index), rendered
 	);
-	Py_DECREF(rendered);
-
-	return piece;
 }
