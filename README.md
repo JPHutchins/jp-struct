@@ -26,22 +26,38 @@ hash(p)                    # immutable + hashable
 
 ## Quickstart
 
-Requires [`uv`](https://docs.astral.sh/uv/) and a CPython with dev headers
-(developed on 3.14; the annotation handling is PEP 649-aware and also handles
-pre-3.14).
+The Nix dev shell is the only supported environment. Enter it once, then work
+inside it — it supplies uv, zig, nixfmt and jphfmt, and pins them.
 
 ```sh
+nix develop
 uv run camas --help
 ```
 
 Tasks live in `tasks.py` and run with [`camas`](https://github.com/JPHutchins/camas),
-so one definition drives both local development and CI.
+so one definition drives both local development and CI. Interpreters come from
+uv, driven by `.python-version`, which is also the matrix the wheels are built
+for.
 
-`build_ext --inplace` lands the compiled `record.*.so` under `src/` and it is
-imported from there (tests via the root `conftest.py`, the benchmark via
-`PYTHONPATH`). `uv run` also installs the project, but that install is only a
-`.pth` pointing at the same `src/`, so there is exactly one built extension
-either way.
+`build_ext --inplace` lands the compiled `record.*.so` under `src/`, and the
+root `conftest.py` puts it on the path when nothing else provides `record`.
+Never install the project to get it — installing means compiling, and on
+Windows that is MSVC, which cannot build this source.
+
+## Wheels
+
+```sh
+nix build .#default
+```
+
+Cross-compiles every wheel with `zig cc` from one machine: manylinux_2_17
+x86_64/aarch64, macOS x86_64/arm64, and Windows amd64/arm64, for every
+interpreter in `.python-version`. `nix flake check` builds them all, verifies
+each payload against the tag it ships under, and installs the native one to run
+the suite against it.
+
+Windows has no source install: `__attribute__((cleanup))` has no MSVC
+equivalent, so a wheel is the only way in.
 
 ## Editor
 
@@ -62,3 +78,7 @@ and a class body can't express positional-only / keyword-only / `*args` /
 `**kwargs` (that's the `record-type` decorator). Not yet seeded but easy to add:
 `dataclass_transform` stubs for type-checkers, pickle/copy/`__replace__`,
 `ClassVar` exclusion, `kw_only`.
+
+## License
+
+MIT
