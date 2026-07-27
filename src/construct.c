@@ -112,7 +112,7 @@ static enum result bind_keywords(
 				break;
 		}
 
-		PyObject ** const slot = record_slot(type, self, found.index);
+		PyObject * * const slot = record_slot(type, self, found.index);
 
 		if (*slot != NULL || found.index < positional_count) {
 			PyErr_Format(
@@ -139,7 +139,7 @@ static enum result fill_defaults(
 	Py_ssize_t const required_count = record_required_count(type);
 
 	for (Py_ssize_t i = positional_count; i < type->record_field_count; ++i) {
-		PyObject ** const slot = record_slot(type, self, i);
+		PyObject * * const slot = record_slot(type, self, i);
 
 		if (*slot != NULL) {
 			continue;

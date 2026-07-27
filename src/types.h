@@ -34,12 +34,12 @@ static inline char const * record_type_name(RecordType const * const type) {
  * record is just its values laid end to end, and every read or write of one
  * goes through here.
  */
-static inline PyObject ** record_slot(
+static inline PyObject * * record_slot(
 	RecordType const * const type,
 	PyObject * const self,
 	Py_ssize_t const index
 ) {
-	return (PyObject **) ((char *) self + type->record_slot_offsets[index]);
+	return (PyObject * *) ((char *) self + type->record_slot_offsets[index]);
 }
 
 /*
