@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Every wheel for every interpreter, cross-compiled on one runner, which also
+  # emits the fan-out for the legs below. The legs are the only other jobs, so
+  # this is what keeps the runner count down.
+  wheels:
+    runs-on: ubuntu-latest
+    outputs:
+      coverage: ${{ steps.emit.outputs.matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DeterminateSystems/nix-installer-action@main
+      - run: nix develop --command uv run camas ci
+      - run: nix build .#default --out-link result-wheels
+      - uses: actions/upload-artifact@v4
+        with:
+          name: wheels
+          path: result-wheels/*.whl
+          if-no-files-found: error
+      - id: emit
+        run: |
+          matrix=$(nix develop --command uv run camas coverage --github-matrix=variants)
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+
+  # Installs the wheel that was just built rather than compiling: it is what
+  # ships, and MSVC cannot build this source at all.
+  coverage:
+    needs: wheels
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.wheels.outputs.coverage) }}
+    runs-on: ${{ matrix.OS }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - uses: actions/download-artifact@v4
+        with:
+          name: wheels
+          path: result-wheels
+      - run: uv run camas coverage --OS ${{ matrix.OS }} --PY ${{ matrix.PY }}

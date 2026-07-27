@@ -11,30 +11,31 @@
   zig,
   python3,
   src,
-  matrix,
-  targetName,
-  target,
+  release,
+  pythonMinor,
+  python,
+  platformName,
+  platform,
 }:
 
 let
-  project = (lib.importTOML (src + "/pyproject.toml")).project;
   build = (lib.importTOML (src + "/pyproject.toml")).tool.jp-struct;
+  version = (lib.importTOML (src + "/pyproject.toml")).project.version;
 
-  pythonMajorMinor = lib.versions.majorMinor matrix.pythonVersion;
-  pythonNoDot = lib.replaceStrings [ "." ] [ "" ] pythonMajorMinor;
+  nodot = lib.replaceStrings [ "." ] [ "" ] pythonMinor;
+  moduleName = lib.replaceStrings [ "{nodot}" ] [ nodot ] platform.moduleName;
 
   distribution = fetchurl {
     url =
       "https://github.com/astral-sh/python-build-standalone/releases/download/"
-      + "${matrix.release}/cpython-${matrix.pythonVersion}+${matrix.release}-"
-      + "${target.pbsTriple}-install_only_stripped.tar.gz";
-    inherit (target) hash;
+      + "${release}/cpython-${python.version}+${release}-"
+      + "${platform.pbsTriple}-install_only_stripped.tar.gz";
+    hash = python.hashes.${platformName};
   };
 in
 stdenvNoCC.mkDerivation {
-  pname = "jp-struct-wheel-${targetName}";
-  inherit (project) version;
-  inherit src;
+  pname = "jp-struct-wheel-${pythonMinor}-${platformName}";
+  inherit version src;
 
   nativeBuildInputs = [
     zig
@@ -54,30 +55,30 @@ stdenvNoCC.mkDerivation {
     tar xzf ${distribution} --strip-components=1 -C "$NIX_BUILD_TOP/python"
 
     zig cc \
-      -target ${target.zigTarget} \
+      -target ${platform.zigTarget} \
       ${lib.escapeShellArgs build.c-flags} \
       -fPIC -shared \
       -I"$NIX_BUILD_TOP/python/include" \
-      -I"$NIX_BUILD_TOP/python/include/python${pythonMajorMinor}" \
+      -I"$NIX_BUILD_TOP/python/include/python${pythonMinor}" \
       ${lib.escapeShellArgs build.sources} \
-      ${lib.optionalString target.linkPythonLibrary ''"$NIX_BUILD_TOP/python/libs/python${pythonNoDot}.lib"''} \
-      ${lib.escapeShellArgs target.extraFlags} \
-      -o "$NIX_BUILD_TOP/${target.moduleName}"
+      ${lib.optionalString platform.linkPythonLibrary ''"$NIX_BUILD_TOP/python/libs/python${nodot}.lib"''} \
+      ${lib.escapeShellArgs platform.extraFlags} \
+      -o "$NIX_BUILD_TOP/${moduleName}"
 
     mkdir -p "$out"
     python3 tools/pack_wheel.py \
-      --extension "$NIX_BUILD_TOP/${target.moduleName}" \
-      --extension-name ${lib.escapeShellArg target.moduleName} \
-      --python-tag ${matrix.pythonTag} \
-      --abi-tag ${matrix.abiTag} \
-      --platform-tag ${target.platformTag} \
+      --extension "$NIX_BUILD_TOP/${moduleName}" \
+      --extension-name ${lib.escapeShellArg moduleName} \
+      --python-tag ${python.tag} \
+      --abi-tag ${python.tag} \
+      --platform-tag ${platform.platformTag} \
       --outdir "$out"
 
     runHook postBuild
   '';
 
   meta = {
-    description = "jp-struct wheel for ${targetName}";
+    description = "jp-struct wheel for CPython ${pythonMinor} on ${platformName}";
     homepage = "https://github.com/JPHutchins/jp-struct";
     platforms = lib.platforms.all;
   };

@@ -17,7 +17,21 @@
       forAllSystems = lib.genAttrs systems;
 
       matrix = import ./nix/python-targets.nix;
-      targetNames = builtins.attrNames matrix.targets;
+
+      # .python-version is the single source of truth for the interpreter set;
+      # drift between it and the generated pins is a build error, not a
+      # silently smaller wheel set.
+      declaredPythons = lib.sort (a: b: a < b) (
+        lib.splitString "\n" (lib.removeSuffix "\n" (lib.fileContents ./.python-version + "\n"))
+      );
+      pinnedPythons = lib.sort (a: b: a < b) (builtins.attrNames matrix.pythons);
+
+      wheelIds = lib.concatMap (
+        pythonMinor:
+        map (platformName: { inherit pythonMinor platformName; }) (
+          builtins.attrNames matrix.pythons.${pythonMinor}.hashes
+        )
+      ) pinnedPythons;
 
       # Only what a wheel is built from, so editing the README or the tests does
       # not invalidate every cross build.
@@ -36,13 +50,19 @@
         let
           pkgs = nixpkgs.legacyPackages.${system};
 
-          wheels = lib.genAttrs targetNames (
-            targetName:
-            pkgs.callPackage ./nix/wheel.nix {
-              src = buildSource;
-              inherit matrix targetName;
-              target = matrix.targets.${targetName};
-            }
+          wheels = lib.listToAttrs (
+            map (
+              { pythonMinor, platformName }:
+              lib.nameValuePair "${pythonMinor}-${platformName}" (
+                pkgs.callPackage ./nix/wheel.nix {
+                  src = buildSource;
+                  inherit (matrix) release;
+                  inherit pythonMinor platformName;
+                  python = matrix.pythons.${pythonMinor};
+                  platform = matrix.platforms.${platformName};
+                }
+              )
+            ) wheelIds
           );
 
           all = pkgs.symlinkJoin {
@@ -66,6 +86,10 @@
 
       forSystem = forAllSystems perSystem;
     in
+    assert lib.assertMsg (declaredPythons == pinnedPythons) (
+      ".python-version lists ${toString declaredPythons} but nix/python-targets.nix pins "
+      + "${toString pinnedPythons}; regenerate with tools/update_python_targets.py"
+    );
     {
       packages = forAllSystems (
         system: forSystem.${system}.named // { default = forSystem.${system}.all; }
@@ -143,7 +167,7 @@
               }
               ''
                 pip install --no-index --no-deps --target=site \
-                  ${forSystem.${system}.wheels.manylinux-x86_64}/*.whl
+                  ${forSystem.${system}.wheels."3.14-manylinux-x86_64"}/*.whl
                 export PYTHONPATH=$PWD/site
                 python -c 'import record; print("imported", record.__file__)'
                 python -m pytest -q -p no:cacheprovider ${./tests}

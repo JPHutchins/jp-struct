@@ -1,11 +1,8 @@
-"""Verify a built wheel without executing it.
+"""Verify a wheel without executing it.
 
-Five of the six targets cannot run on the builder, so what can be checked is
-the wheel's own consistency and the shape of the binary inside it: that RECORD
-matches the payload, that the declared tag matches the filename, and that the
-object really is for the architecture and OS the tag claims.
-
-    python tools/check_wheel.py dist/*.whl
+Five of the six platforms cannot run on the builder, so what is checkable is
+the wheel's internal consistency and whether the payload matches the tag it
+ships under.
 """
 
 from __future__ import annotations

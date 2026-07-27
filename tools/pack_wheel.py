@@ -1,12 +1,7 @@
 """Pack a built extension module into a PEP 427 wheel.
 
-The wheel is byte-for-byte reproducible: entries are sorted and every timestamp
-is pinned to the zip epoch, so the same inputs always hash the same.
-
-    python tools/pack_wheel.py --extension record.pyd \
-        --extension-name record.cp314-win_amd64.pyd \
-        --python-tag cp314 --abi-tag cp314 --platform-tag win_amd64 \
-        --outdir dist
+Entries are sorted and timestamps pinned, so the same inputs produce the same
+bytes -- nix requires it.
 """
 
 from __future__ import annotations
