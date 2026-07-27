@@ -55,7 +55,7 @@ jobs:
     runs-on: ${{ matrix.OS }}
     steps:
       - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v9
+      - uses: astral-sh/setup-uv@v9.0.0
       - uses: actions/download-artifact@v8
         with:
           name: wheels
