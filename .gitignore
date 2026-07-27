@@ -6,4 +6,5 @@ __pycache__/
 *.egg-info/
 .pytest_cache/
 dist/
+.claude/settings.local.json
 # Note: uv.lock is intentionally NOT ignored — commit it for reproducible envs.

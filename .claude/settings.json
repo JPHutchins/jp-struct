@@ -1,0 +1,30 @@
+{
+  "hooks": {
+    "PostToolBatch": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run camas mcp fix || exit 0"
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "uv run camas mcp fix || exit 0"
+          },
+          {
+            "type": "command",
+            "command": "uv run camas mcp gate --under 5s --nudge",
+            "async": true,
+            "asyncRewake": true
+          }
+        ]
+      }
+    ]
+  }
+}
