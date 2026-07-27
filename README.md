@@ -18,10 +18,11 @@ hash(p)                    # immutable + hashable
 # p.x = 9.0                # TypeError: immutable
 ```
 
-> The C in `src/record.c` is the **seed** copied verbatim from the feasibility
-> prototype ([JPHutchins/record-type#1](https://github.com/JPHutchins/record-type/pull/1)).
-> It's meant to be rewritten by hand — this repo is the scaffolding so the
-> toolchain is out of your way.
+> The C under `src/` began as the **seed** copied from the feasibility
+> prototype ([JPHutchins/record-type#1](https://github.com/JPHutchins/record-type/pull/1)),
+> since split by hand into one translation unit per concern. It's still meant
+> to be rewritten — this repo is the scaffolding so the toolchain is out of
+> your way.
 
 ## Quickstart
 
@@ -39,13 +40,13 @@ make help       # list targets
 
 The package is **not installed** into the venv: `build_ext --inplace` lands the
 compiled `record.*.so` under `src/`, imported from there (tests via the root
-`conftest.py`, the benchmark via `PYTHONPATH`). Edit `src/record.c`, `make build`,
-rerun — no reinstall step.
+`conftest.py`, the benchmark via `PYTHONPATH`). Edit the C under `src/`,
+`make build`, rerun — no reinstall step.
 
 ## Editor
 
-`src/record.c` needs `Python.h` on the include path, so clangd needs a compilation
-database. `make compiledb` produces one at `build/compile_commands.json`, which
+The C under `src/` needs `Python.h` on the include path, so clangd needs a
+compilation database. `make compiledb` produces one at `build/compile_commands.json`, which
 `.clangd` points at; `.vscode/settings.json` disables the C/C++ extension's rival
 IntelliSense engine and gives clangd a `--query-driver` for the host `cc`.
 
@@ -56,7 +57,14 @@ Run it once after cloning, and again whenever `setup.py` or the interpreter chan
 
 | path | what |
 |---|---|
-| `src/record.c` | the C extension (`RecordMeta` metaclass + `Record` base) — rewrite target |
+| `src/record.c` | module definition and init |
+| `src/meta.c` | `RecordMeta`: type creation, GC, slot offsets |
+| `src/fields.c` | field order, inheritance, defaults |
+| `src/construct.c` | per-type vectorcall — instance creation |
+| `src/hash.c`, `repr.c`, `compare.c`, `mixin.c` | the dunders |
+| `src/annotations.c` | annotation extraction (PEP 649 aware) |
+| `src/types.h` | `RecordType` + the shared slot accessors |
+| `src/result.h` | `RESULT_OK` / `RESULT_ERR` |
 | `setup.py` | declares the `record` extension |
 | `pyproject.toml` | metadata + dev/bench deps (`[dependency-groups]`) |
 | `Makefile` | `build` / `test` / `bench` / `compiledb` / `clean` |
