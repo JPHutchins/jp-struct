@@ -14,8 +14,7 @@ static PyObject * tuple_or_empty(PyObject * tuple);
 static PyGetSetDef Record_getset[];
 
 PyTypeObject RecordMixin_Type = {
-	PyVarObject_HEAD_INIT(NULL, 0)
-	.tp_name = "record._RecordMixin",
+	PyVarObject_HEAD_INIT(NULL, 0) .tp_name = "record._RecordMixin",
 	.tp_basicsize = sizeof(PyObject),
 	.tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
 	.tp_setattro = Record_set_attribute,
@@ -36,12 +35,16 @@ static PyGetSetDef Record_getset[] = {
 		.get = Record_get_defaults,
 		.doc = "tuple of trailing defaults",
 	},
-	{ .name = NULL },
+	{.name = NULL},
 };
 
 /* Records are frozen, so every write fails.  A NULL value is how CPython
  * spells `del`, which is the only thing the two messages differ over. */
-static int Record_set_attribute(PyObject * const self, PyObject * const name, PyObject * const value) {
+static int Record_set_attribute(
+	PyObject * const self,
+	PyObject * const name,
+	PyObject * const value
+) {
 	PyErr_Format(
 		PyExc_TypeError,
 		"%.200s object does not support attribute %s",

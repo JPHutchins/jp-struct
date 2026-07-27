@@ -168,7 +168,7 @@ static enum result fill_defaults(
 static struct field_lookup find_field(RecordType const * const type, PyObject * const name) {
 	for (Py_ssize_t i = 0; i < type->record_field_count; ++i) {
 		if (name == PyTuple_GET_ITEM(type->record_field_names, i)) {
-			return (struct field_lookup){ .tag = FIELD_LOOKUP_FOUND, .index = i };
+			return (struct field_lookup) { .tag = FIELD_LOOKUP_FOUND, .index = i };
 		}
 	}
 
@@ -176,13 +176,13 @@ static struct field_lookup find_field(RecordType const * const type, PyObject * 
 		int const compared = PyUnicode_Compare(name, PyTuple_GET_ITEM(type->record_field_names, i));
 
 		if (compared == 0) {
-			return (struct field_lookup){ .tag = FIELD_LOOKUP_FOUND, .index = i };
+			return (struct field_lookup) { .tag = FIELD_LOOKUP_FOUND, .index = i };
 		}
 
 		if (compared == -1 && PyErr_Occurred()) {
-			return (struct field_lookup){ .tag = FIELD_LOOKUP_ERROR };
+			return (struct field_lookup) { .tag = FIELD_LOOKUP_ERROR };
 		}
 	}
 
-	return (struct field_lookup){ .tag = FIELD_LOOKUP_MISSING };
+	return (struct field_lookup) { .tag = FIELD_LOOKUP_MISSING };
 }

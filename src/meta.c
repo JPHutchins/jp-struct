@@ -8,7 +8,7 @@
 #include "types.h"
 
 #ifndef Py_TPFLAGS_HAVE_VECTORCALL
-#define Py_TPFLAGS_HAVE_VECTORCALL _Py_TPFLAGS_HAVE_VECTORCALL
+#	define Py_TPFLAGS_HAVE_VECTORCALL _Py_TPFLAGS_HAVE_VECTORCALL
 #endif
 
 /* Where type.__new__ placed the slot it created for a field name. */
@@ -52,13 +52,10 @@ static struct member_lookup find_member(
 );
 
 PyTypeObject RecordMeta_Type = {
-	PyVarObject_HEAD_INIT(NULL, 0)
-	.tp_name = "record.RecordMeta",
+	PyVarObject_HEAD_INIT(NULL, 0) .tp_name = "record.RecordMeta",
 	.tp_basicsize = sizeof(RecordType),
 	.tp_itemsize = sizeof(PyMemberDef),
-	.tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_TYPE_SUBCLASS
-	          | Py_TPFLAGS_HAVE_GC | Py_TPFLAGS_HAVE_VECTORCALL
-	          | Py_TPFLAGS_BASETYPE,
+	.tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_TYPE_SUBCLASS | Py_TPFLAGS_HAVE_GC | Py_TPFLAGS_HAVE_VECTORCALL | Py_TPFLAGS_BASETYPE,
 	.tp_new = RecordMeta_new,
 	.tp_dealloc = RecordMeta_dealloc,
 	.tp_traverse = RecordMeta_traverse,
@@ -81,10 +78,17 @@ PyObject * RecordMeta_new(
 	PyObject * bases;
 	PyObject * original_namespace;
 
-	if (!PyArg_ParseTuple(
-		args, "UO!O!:RecordMeta.__new__",
-		&name, &PyTuple_Type, &bases, &PyDict_Type, &original_namespace
-	)) {
+	if (
+		!PyArg_ParseTuple(
+			args,
+			"UO!O!:RecordMeta.__new__",
+			&name,
+			&PyTuple_Type,
+			&bases,
+			&PyDict_Type,
+			&original_namespace
+		)
+	) {
 		return NULL;
 	}
 
@@ -270,13 +274,13 @@ static struct member_lookup find_member(
 ) {
 	for (Py_ssize_t i = 0; i < member_count; ++i) {
 		if (PyUnicode_CompareWithASCIIString(name, members[i].name) == 0) {
-			return (struct member_lookup){
+			return (struct member_lookup) {
 				.tag = MEMBER_LOOKUP_FOUND, .offset = members[i].offset
 			};
 		}
 	}
 
-	return (struct member_lookup){ .tag = MEMBER_LOOKUP_MISSING };
+	return (struct member_lookup) { .tag = MEMBER_LOOKUP_MISSING };
 }
 
 /* `visit` and `arg` are not free names: Py_VISIT expands to reference both by

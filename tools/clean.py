@@ -19,8 +19,6 @@ PRUNED_FILE_SUFFIXES: Final = frozenset({".so", ".o"})
 
 
 def _walk(root: Path) -> Iterator[Path]:
-    """Everything under `root`, skipping trees that are not ours to delete."""
-
     for path in root.iterdir():
         if path.name in KEEP_OUT_OF:
             continue

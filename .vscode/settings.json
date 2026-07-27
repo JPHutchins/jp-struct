@@ -5,6 +5,11 @@
     "--header-insertion=never"
   ],
   "C_Cpp.intelliSenseEngine": "disabled",
+  "files.associations": { "*.h": "c" },
+  "[c]": {
+    "editor.defaultFormatter": "JPH.jphfmt",
+    "editor.formatOnSave": true
+  },
   "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
   "python.analysis.typeCheckingMode": "strict"
 }
