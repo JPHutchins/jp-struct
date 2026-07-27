@@ -5,7 +5,7 @@ form supports: construction by position/keyword, defaults, immutability,
 structural equality, hashing, repr, __match_args__/__slots__/__annotations__,
 single-base field inheritance, and metaclass identity.
 
-Run with `make test` (or `python -m pytest`).
+Run with `uv run camas test` (or `python -m pytest`).
 """
 
 import pytest

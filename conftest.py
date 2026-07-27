@@ -1,6 +1,6 @@
 """Make the in-place-built `record` extension importable during tests.
 
-`make build` (build_ext --inplace) drops `record.*.so` under src/ rather than
+`uv run camas build` (build_ext --inplace) drops `record.*.so` under src/ rather than
 installing the package, so we prepend src/ (and the repo root, as a fallback) to
 sys.path here. pytest imports this conftest before collecting tests, so
 `import record` works without an install.

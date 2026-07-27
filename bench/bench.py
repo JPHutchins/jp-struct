@@ -11,7 +11,7 @@ so the numbers are directly comparable to the interstellar-inclination article:
     name (never a real library name) so it can't shadow the dependency.
   * instantiation (ns/op): timeit, min of N repeats, 3-field construct.
 
-Run with `make bench` (which builds first), or directly after `make build`:
+Run with `uv run camas benchmark` (which builds first), or directly after a build:
     python bench/bench.py
 """
 

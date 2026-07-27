@@ -1,6 +1,6 @@
 """Build the `record` C extension.
 
-Run via the Makefile (`make build`), or directly:
+Run via camas (`uv run camas build`), or directly:
 
     python setup.py build_ext --inplace
 

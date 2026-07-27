@@ -31,48 +31,25 @@ Requires [`uv`](https://docs.astral.sh/uv/) and a CPython with dev headers
 pre-3.14).
 
 ```sh
-make build      # sync .venv + compile record.*.so in place
-make test       # pytest
-make bench      # compare import / type-creation / instantiation vs the field
-make compiledb  # build/compile_commands.json for clangd
-make help       # list targets
+uv run camas --help
 ```
 
-The package is **not installed** into the venv: `build_ext --inplace` lands the
-compiled `record.*.so` under `src/`, imported from there (tests via the root
-`conftest.py`, the benchmark via `PYTHONPATH`). Edit the C under `src/`,
-`make build`, rerun — no reinstall step.
+Tasks live in `tasks.py` and run with [`camas`](https://github.com/JPHutchins/camas),
+so one definition drives both local development and CI.
+
+`build_ext --inplace` lands the compiled `record.*.so` under `src/` and it is
+imported from there (tests via the root `conftest.py`, the benchmark via
+`PYTHONPATH`). `uv run` also installs the project, but that install is only a
+`.pth` pointing at the same `src/`, so there is exactly one built extension
+either way.
 
 ## Editor
 
 The C under `src/` needs `Python.h` on the include path, so clangd needs a
-compilation database. `make compiledb` produces one at `build/compile_commands.json`, which
-`.clangd` points at; `.vscode/settings.json` disables the C/C++ extension's rival
-IntelliSense engine and gives clangd a `--query-driver` for the host `cc`.
-
-Run it once after cloning, and again whenever `setup.py` or the interpreter changes
-— it is derived from the real build, not a second copy of the flags.
-
-## Layout
-
-| path | what |
-|---|---|
-| `src/record.c` | module definition and init |
-| `src/meta.c` | `RecordMeta`: type creation, GC, slot offsets |
-| `src/fields.c` | field order, inheritance, defaults |
-| `src/construct.c` | per-type vectorcall — instance creation |
-| `src/hash.c`, `repr.c`, `compare.c`, `mixin.c` | the dunders |
-| `src/annotations.c` | annotation extraction (PEP 649 aware) |
-| `src/types.h` | `RecordType` + the shared slot accessors |
-| `src/result.h` | `RESULT_OK` / `RESULT_ERR` |
-| `setup.py` | declares the `record` extension |
-| `pyproject.toml` | metadata + dev/bench deps (`[dependency-groups]`) |
-| `Makefile` | `build` / `test` / `bench` / `compiledb` / `clean` |
-| `conftest.py` | puts the in-place `.so` on `sys.path` for pytest |
-| `tests/test_record.py` | correctness tests |
-| `bench/bench.py` | benchmark harness (mirrors `python-struct-profiling`) |
-| `tools/compile_commands.py` | records the real `build_ext` compile line into a clangd database |
-| `.clangd`, `.vscode/` | point clangd at `build/compile_commands.json` |
+compilation database. `uv run camas compile_commands` writes one to
+`build/compile_commands.json`, where `.clangd` points. It is recorded from the
+real build rather than re-declared, so it cannot drift from `setup.py` — re-run
+it when `setup.py` or the interpreter changes.
 
 ## What it is / isn't
 
