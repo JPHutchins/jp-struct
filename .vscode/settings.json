@@ -1,0 +1,10 @@
+{
+  "clangd.arguments": [
+    "--query-driver=/usr/bin/cc,/usr/bin/gcc,/usr/bin/clang",
+    "--background-index",
+    "--header-insertion=never"
+  ],
+  "C_Cpp.intelliSenseEngine": "disabled",
+  "python.defaultInterpreterPath": "${workspaceFolder}/.venv/bin/python",
+  "python.analysis.typeCheckingMode": "strict"
+}

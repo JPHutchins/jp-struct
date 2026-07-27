@@ -30,16 +30,27 @@ Requires [`uv`](https://docs.astral.sh/uv/) and a CPython with dev headers
 pre-3.14).
 
 ```sh
-make build    # sync .venv + compile record.*.so in place
-make test     # pytest
-make bench    # compare import / type-creation / instantiation vs the field
-make help     # list targets
+make build      # sync .venv + compile record.*.so in place
+make test       # pytest
+make bench      # compare import / type-creation / instantiation vs the field
+make compiledb  # build/compile_commands.json for clangd
+make help       # list targets
 ```
 
 The package is **not installed** into the venv: `build_ext --inplace` lands the
 compiled `record.*.so` under `src/`, imported from there (tests via the root
 `conftest.py`, the benchmark via `PYTHONPATH`). Edit `src/record.c`, `make build`,
 rerun — no reinstall step.
+
+## Editor
+
+`src/record.c` needs `Python.h` on the include path, so clangd needs a compilation
+database. `make compiledb` produces one at `build/compile_commands.json`, which
+`.clangd` points at; `.vscode/settings.json` disables the C/C++ extension's rival
+IntelliSense engine and gives clangd a `--query-driver` for the host `cc`.
+
+Run it once after cloning, and again whenever `setup.py` or the interpreter changes
+— it is derived from the real build, not a second copy of the flags.
 
 ## Layout
 
@@ -48,10 +59,12 @@ rerun — no reinstall step.
 | `src/record.c` | the C extension (`RecordMeta` metaclass + `Record` base) — rewrite target |
 | `setup.py` | declares the `record` extension |
 | `pyproject.toml` | metadata + dev/bench deps (`[dependency-groups]`) |
-| `Makefile` | `build` / `test` / `bench` / `clean` |
+| `Makefile` | `build` / `test` / `bench` / `compiledb` / `clean` |
 | `conftest.py` | puts the in-place `.so` on `sys.path` for pytest |
 | `tests/test_record.py` | correctness tests |
 | `bench/bench.py` | benchmark harness (mirrors `python-struct-profiling`) |
+| `tools/compile_commands.py` | records the real `build_ext` compile line into a clangd database |
+| `.clangd`, `.vscode/` | point clangd at `build/compile_commands.json` |
 
 ## What it is / isn't
 
