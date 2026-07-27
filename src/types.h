@@ -2,6 +2,11 @@
 
 #include <Python.h>
 
+/* PyMemberDef only became visible through Python.h in 3.12. */
+#if PY_VERSION_HEX < 0x030C0000
+#	include <structmember.h>
+#endif
+
 /* An instance of RecordMeta *is* a record class.  We extend the heap-type
  * object with the per-type field metadata needed for fast construction and
  * the dunder methods. */

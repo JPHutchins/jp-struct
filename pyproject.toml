@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=70"]
+requires = ["setuptools>=70", "tomli>=2; python_version<'3.11'"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,10 +7,7 @@ name = "jp-struct"
 version = "0.0.0"
 description = "A C-backed, inheritable Record/Struct base class for Python — fast import, fast type creation"
 readme = "README.md"
-# Floor matches the only verified/tested interpreter. The C has a pre-3.14
-# annotation path (record_get_annotations), so lowering to >=3.11 is plausible
-# once you build+test against it.
-requires-python = ">=3.14"
+requires-python = ">=3.10"
 authors = [{ name = "JP Hutchins", email = "jp@intercreate.io" }]
 
 # The importable module is `record` (from record import Record); the C source
@@ -24,8 +21,37 @@ dev = [
     "setuptools>=70",            # build_ext
     "pytest>=8",                 # tests
     "msgspec>=0.21",             # bench: comparison target
-    "record-type>=2023.1.post1", # bench: comparison target (the `records` module)
+    # bench: comparison target (the `records` module); it floors at 3.11, which
+    # must not drag the library's own floor up with it.
+    "record-type>=2023.1.post1; python_version>='3.11'",
     "camas[mcp]==0.1.29",
+]
+
+[tool.jp-struct]
+# Read by setup.py for the local build and by nix/wheel.nix for the cross
+# builds, so a flag or a new translation unit lands in both.
+#
+# -Wno-unused-parameter: CPython slot signatures are fixed by the API and
+# routinely ignore an argument.
+c-flags = [
+    "-std=c2x",
+    "-O2",
+    "-Werror",
+    "-Wdouble-promotion",
+    "-Wall",
+    "-Wextra",
+    "-Wno-unused-parameter",
+]
+sources = [
+    "src/record.c",
+    "src/annotations.c",
+    "src/compare.c",
+    "src/construct.c",
+    "src/fields.c",
+    "src/hash.c",
+    "src/meta.c",
+    "src/mixin.c",
+    "src/repr.c",
 ]
 
 [tool.pytest.ini_options]
