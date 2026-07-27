@@ -18,12 +18,24 @@ jobs:
     outputs:
       coverage: ${{ steps.emit.outputs.matrix }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: DeterminateSystems/nix-installer-action@main
+      # Keyed on what determines the closure. A source-only change misses the
+      # key but still restores through the prefix, so the interpreter archives
+      # -- the expensive part -- survive and only the compiles re-run.
+      - uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.lock', 'flake.nix', 'nix/**') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          gc-max-store-size-linux: 5G
+          purge: true
+          purge-prefixes: nix-${{ runner.os }}-
+          purge-created: 0
+          purge-primary-key: never
       - run: nix develop --command uv sync --no-install-project
       - run: nix develop --command uv run --no-sync camas ci
       - run: nix build .#default --out-link result-wheels
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: wheels
           path: result-wheels/*.whl
@@ -42,9 +54,9 @@ jobs:
       matrix: ${{ fromJSON(needs.wheels.outputs.coverage) }}
     runs-on: ${{ matrix.OS }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@v7
+      - uses: astral-sh/setup-uv@v9
+      - uses: actions/download-artifact@v8
         with:
           name: wheels
           path: result-wheels
