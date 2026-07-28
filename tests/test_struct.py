@@ -59,6 +59,13 @@ def test_struct_fields_introspection():
     assert WithDefaults(1).__struct_defaults__ == (2, 3)
 
 
+def test_introspection_answers_on_the_class_too():
+    assert Point2D.__struct_fields__ == ("x", "y")
+    assert WithDefaults.__struct_defaults__ == (2, 3)
+    assert Struct.__struct_fields__ == ()
+    assert Struct.__struct_defaults__ == ()
+
+
 def test_defaults():
     assert WithDefaults(1) == WithDefaults(1, 2, 3)
     assert WithDefaults(1, b=20).b == 20

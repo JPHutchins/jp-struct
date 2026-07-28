@@ -10,7 +10,6 @@
 static int Struct_set_attribute(PyObject * self, PyObject * name, PyObject * value);
 static PyObject * Struct_get_field_names(PyObject * self, void * closure);
 static PyObject * Struct_get_defaults(PyObject * self, void * closure);
-static PyObject * tuple_or_empty(PyObject * tuple);
 static PyGetSetDef Struct_getset[];
 
 PyTypeObject StructMixin_Type = {
@@ -56,15 +55,9 @@ static int Struct_set_attribute(
 }
 
 static PyObject * Struct_get_field_names(PyObject * const self, void * const closure) {
-	return tuple_or_empty(struct_type_of(self)->struct_field_names);
+	return struct_tuple_or_empty(struct_type_of(self)->struct_field_names);
 }
 
 static PyObject * Struct_get_defaults(PyObject * const self, void * const closure) {
-	return tuple_or_empty(struct_type_of(self)->struct_defaults);
-}
-
-/* Both tuples are NULL on the mixin itself, which has no fields; an empty
- * tuple is the honest answer rather than None. */
-static PyObject * tuple_or_empty(PyObject * const tuple) {
-	return tuple != NULL ? Py_NewRef(tuple) : PyTuple_New(0);
+	return struct_tuple_or_empty(struct_type_of(self)->struct_defaults);
 }

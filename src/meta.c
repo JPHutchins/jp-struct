@@ -57,6 +57,10 @@ static Py_ssize_t * resolve_slot_offsets(
 	PyObject * new_names,
 	Py_ssize_t field_count
 );
+static PyObject * StructMeta_get_field_names(PyObject * self, void * closure);
+static PyObject * StructMeta_get_defaults(PyObject * self, void * closure);
+static PyGetSetDef StructMeta_getset[];
+
 static struct member_lookup find_member(
 	PyMemberDef const * members,
 	Py_ssize_t member_count,
@@ -74,7 +78,33 @@ PyTypeObject StructMeta_Type = {
 	.tp_clear = StructMeta_clear,
 	.tp_call = PyVectorcall_Call,
 	.tp_vectorcall_offset = offsetof(PyTypeObject, tp_vectorcall),
+	.tp_getset = StructMeta_getset,
 };
+
+/* The mixin answers these for an instance; the metaclass answers the same
+ * questions of the class, which is where msgspec puts them and so where a
+ * reader looks first. */
+static PyGetSetDef StructMeta_getset[] = {
+	{
+		.name = "__struct_fields__",
+		.get = StructMeta_get_field_names,
+		.doc = "tuple of field names",
+	},
+	{
+		.name = "__struct_defaults__",
+		.get = StructMeta_get_defaults,
+		.doc = "tuple of trailing defaults",
+	},
+	{.name = NULL},
+};
+
+static PyObject * StructMeta_get_field_names(PyObject * const self, void * const closure) {
+	return struct_tuple_or_empty(((StructType *) self)->struct_field_names);
+}
+
+static PyObject * StructMeta_get_defaults(PyObject * const self, void * const closure) {
+	return struct_tuple_or_empty(((StructType *) self)->struct_defaults);
+}
 
 /*
  * Creating a struct class is four steps: work out the fields, build the
@@ -358,6 +388,10 @@ static Py_ssize_t * resolve_slot_offsets(
 
 	return offsets;
 }
+
+static PyObject * StructMeta_get_field_names(PyObject * self, void * closure);
+static PyObject * StructMeta_get_defaults(PyObject * self, void * closure);
+static PyGetSetDef StructMeta_getset[];
 
 static struct member_lookup find_member(
 	PyMemberDef const * const members,

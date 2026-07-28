@@ -68,6 +68,12 @@ static inline Py_ssize_t struct_required_count(StructType const * const type) {
 	return type->struct_field_count - type->struct_default_count;
 }
 
+/* Both tuples are NULL on the mixin itself, which has no fields; an empty
+ * tuple is the honest answer rather than None. */
+static inline PyObject * struct_tuple_or_empty(PyObject * const tuple) {
+	return tuple != NULL ? Py_NewRef(tuple) : PyTuple_New(0);
+}
+
 /* Access the PyMemberDef array that floats behind a heap type. Mirrors
  * msgspec's MS_PyHeapType_GET_MEMBERS: the members live just past the type
  * object, which (for a custom metaclass) is sized by the metaclass basicsize. */
