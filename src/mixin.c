@@ -14,7 +14,7 @@ static PyObject * tuple_or_empty(PyObject * tuple);
 static PyGetSetDef Struct_getset[];
 
 PyTypeObject StructMixin_Type = {
-	PyVarObject_HEAD_INIT(NULL, 0) .tp_name = "struct._StructMixin",
+	PyVarObject_HEAD_INIT(NULL, 0) .tp_name = "jpstruct._StructMixin",
 	.tp_basicsize = sizeof(PyObject),
 	.tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
 	.tp_setattro = Struct_set_attribute,

@@ -133,3 +133,9 @@ def test_empty_struct():
 def test_metaclass_identity():
     assert type(Point2D) is jpstruct.StructMeta
     assert isinstance(Point2D(1.0, 2.0), Struct)
+
+
+def test_module_of_the_exported_names():
+    assert Struct.__module__ == "jpstruct"
+    assert jpstruct.StructMeta.__module__ == "jpstruct"
+    assert Point2D.__module__ == __name__

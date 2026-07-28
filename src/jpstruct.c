@@ -30,6 +30,7 @@
 
 #include "meta.h"
 #include "mixin.h"
+#include "owned.h"
 #include "result.h"
 
 static int struct_exec(PyObject * module);
@@ -86,23 +87,26 @@ static enum result add_struct_base(PyObject * const module) {
 /* Build the public ``Struct`` base via the metaclass, so its metaclass is
  * StructMeta and it inherits the dunders from the mixin. */
 static PyObject * create_struct_base(void) {
-	PyObject * const name = PyUnicode_FromString("Struct");
-	PyObject * const bases = PyTuple_Pack(1, (PyObject *) &StructMixin_Type);
-	PyObject * const namespace = PyDict_New();
-	PyObject * const args = name != NULL && bases != NULL && namespace != NULL
-		? PyTuple_Pack(3, name, bases, namespace)
-		: NULL;
+	PY_OWNED(name, PyUnicode_FromString("Struct"));
+	PY_OWNED(module_name, PyUnicode_FromString(struct_module.m_name));
+	PY_OWNED(bases, PyTuple_Pack(1, (PyObject *) &StructMixin_Type));
+	PY_OWNED(namespace, PyDict_New());
 
-	Py_XDECREF(name);
-	Py_XDECREF(bases);
-	Py_XDECREF(namespace);
+	if (name == NULL || module_name == NULL || bases == NULL || namespace == NULL) {
+		return NULL;
+	}
+
+	/* A class body supplies __module__; an empty namespace leaves the type to
+	 * take it from whatever frame the import machinery is running. */
+	if (PyDict_SetItemString(namespace, "__module__", module_name) < 0) {
+		return NULL;
+	}
+
+	PY_OWNED(args, PyTuple_Pack(3, name, bases, namespace));
 
 	if (args == NULL) {
 		return NULL;
 	}
 
-	PyObject * const struct_base = StructMeta_new(&StructMeta_Type, args, NULL);
-	Py_DECREF(args);
-
-	return struct_base;
+	return StructMeta_new(&StructMeta_Type, args, NULL);
 }
