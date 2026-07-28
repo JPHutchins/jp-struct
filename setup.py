@@ -4,9 +4,7 @@ Run via camas (`uv run camas build`), or directly:
 
     python setup.py build_ext --inplace
 
-This produces `jpstruct.*.so` in the repo root, importable as `jpstruct`. Sources
-and compile flags come from pyproject.toml's [tool.jp-struct], which the nix
-cross builds read too.
+This produces `jpstruct.*.so` in the repo root, importable as `jpstruct`.
 """
 
 import sys
@@ -14,15 +12,14 @@ from pathlib import Path
 
 from setuptools import Extension, setup
 
-if sys.version_info >= (3, 11):
-    import tomllib
-else:
-    import tomli as tomllib
+# A PEP 517 build runs with the source tree off the path, and build_config is
+# not a distribution to be resolved.
+sys.path.insert(0, str(Path(__file__).parent))
 
-config = tomllib.loads(Path(__file__).with_name("pyproject.toml").read_text())["tool"]["jp-struct"]
+from build_config import BUILD  # noqa: E402
 
 setup(
     ext_modules=[
-        Extension("jpstruct", config["sources"], extra_compile_args=config["c-flags"]),
+        Extension("jpstruct", list(BUILD.sources), extra_compile_args=list(BUILD.c_flags)),
     ],
 )

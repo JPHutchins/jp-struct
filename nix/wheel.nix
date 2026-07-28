@@ -19,7 +19,6 @@
 }:
 
 let
-  build = (lib.importTOML (src + "/pyproject.toml")).tool.jp-struct;
   version = (lib.importTOML (src + "/pyproject.toml")).project.version;
 
   nodot = lib.replaceStrings [ "." ] [ "" ] pythonMinor;
@@ -54,13 +53,16 @@ stdenvNoCC.mkDerivation {
     mkdir -p "$NIX_BUILD_TOP/python"
     tar xzf ${distribution} --strip-components=1 -C "$NIX_BUILD_TOP/python"
 
+    mapfile -t cFlags < <(python3 build_config.py c-flags)
+    mapfile -t sources < <(python3 build_config.py sources)
+
     zig cc \
       -target ${platform.zigTarget} \
-      ${lib.escapeShellArgs build.c-flags} \
+      "''${cFlags[@]}" \
       -fPIC -shared \
       -I"$NIX_BUILD_TOP/python/include" \
       -I"$NIX_BUILD_TOP/python/include/python${pythonMinor}" \
-      ${lib.escapeShellArgs build.sources} \
+      "''${sources[@]}" \
       ${lib.optionalString platform.linkPythonLibrary ''"$NIX_BUILD_TOP/python/libs/python${nodot}.lib"''} \
       ${lib.escapeShellArgs platform.extraFlags} \
       -o "$NIX_BUILD_TOP/${moduleName}"

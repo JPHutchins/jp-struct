@@ -40,6 +40,7 @@
         fileset = lib.fileset.unions [
           ./src
           ./tools/pack_wheel.py
+          ./build_config.py
           ./pyproject.toml
           ./README.md
           ./LICENSE

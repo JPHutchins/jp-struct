@@ -64,6 +64,7 @@ def main() -> int:
             cmdclass={**kwargs.pop("cmdclass", {}), "build_ext": _recording_build_ext},
         )
 
+    sys.path.insert(0, str(ROOT))
     setuptools.setup = recording_setup
     try:
         runpy.run_path(str(ROOT / "setup.py"), run_name="__main__")

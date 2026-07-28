@@ -14,7 +14,7 @@ OLDEST = min(PYTHONS, key=lambda python: tuple(map(int, python.split("."))))
 NEWEST = max(PYTHONS, key=lambda python: tuple(map(int, python.split("."))))
 
 # --no-project: camas's dev group floors above the oldest interpreter here.
-UV = "uv run --no-project --managed-python --python {PY} --with setuptools --with tomli --with pytest"
+UV = "uv run --no-project --managed-python --python {PY} --with setuptools --with pytest"
 
 NIX_INPUTS = ("src/", "nix/", "tools/", "tests/", "flake.nix", "flake.lock", "pyproject.toml")
 
