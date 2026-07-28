@@ -91,12 +91,17 @@ def check(path: Path) -> Iterator[Failure]:
     if f"{dist_info}/RECORD" in names:
         yield from check_record(path, archive, f"{dist_info}/RECORD")
 
-    modules = [name for name in names if not name.startswith(f"{dist_info}/")]
+    payloads = [
+        name
+        for name in names
+        if not name.startswith(f"{dist_info}/") and name.endswith((".so", ".pyd"))
+    ]
 
-    if len(modules) != 1:
-        yield Failure(path.name, f"expected exactly one module payload, found {sorted(modules)}")
+    if len(payloads) != 1:
+        yield Failure(path.name, f"expected exactly one binary payload, found {sorted(payloads)}")
         return
 
+    modules = payloads
     binary = archive.read(modules[0])
     expected = EXPECTED.get(platform_tag)
 
@@ -115,10 +120,19 @@ def check(path: Path) -> Iterator[Failure]:
         yield Failure(path.name, f"{modules[0]} does not contain {symbol.decode()}")
 
 
-def init_symbol(module_file: str) -> bytes:
-    """A payload named for a module has to export that module's init function."""
+def init_symbol(payload: str) -> bytes:
+    """A payload has to export the init function of the module it is.
 
-    return b"PyInit_" + module_file.split(".")[0].encode()
+    The extension is built as a package's __init__, so the module it stands for
+    is the directory holding it -- which is also what CPython's loader derives
+    the symbol from.
+    """
+
+    directory, _, filename = payload.rpartition("/")
+    stem = filename.split(".")[0]
+    module = directory.rpartition("/")[2] if stem == "__init__" else stem
+
+    return b"PyInit_" + module.encode()
 
 
 def check_record(path: Path, archive: zipfile.ZipFile, record_name: str) -> Iterator[Failure]:

@@ -59,6 +59,24 @@ c_analyzer = Task(
 )
 analyze = Sequential(compile_flags, Parallel(c_tidy, c_analyzer))
 
+# A checker reads jpstruct/__init__.pyi and never imports the extension, so
+# there is nothing to build first. Targeting the floor is the point: that is
+# where the stub has to hold, whatever interpreter the checker itself runs on.
+TYPE_CHECK = "uv run --no-project --with typing_extensions"
+mypy = Task(
+    TYPE_CHECK + " --with mypy mypy --strict --warn-unused-ignores"
+    " --python-version " + OLDEST + " tests/typing"
+)
+pyright = Task(TYPE_CHECK + " --with pyright pyright --pythonversion " + OLDEST + " tests/typing")
+
+# ty does not honour the suppression comments the other two do, so it reads the
+# acceptances; the rejections are asserted by the checkers that report a
+# suppression they did not need.
+ty = Task(
+    TYPE_CHECK + " --with ty ty check --python-version " + OLDEST + " tests/typing/accepted.py"
+)
+type_check = Parallel(mypy, pyright, ty)
+
 bench = Project("bench")
 
 # Built by nix because they embed CPython: libpython and unity have to be on
@@ -88,7 +106,7 @@ free_threaded_pytest = Task(
 )
 free_threaded = Sequential(free_threaded_build, free_threaded_pytest)
 benchmark = Sequential(Task("uv run python setup.py build_ext --inplace", mutates=True), bench)
-check = Parallel(test, free_threaded, format_check, analyze, c_test)
+check = Parallel(test, free_threaded, format_check, analyze, c_test, type_check)
 
 # Installed, not compiled: MSVC has no __attribute__((cleanup)), so the Windows
 # leg cannot build this source at all.
@@ -128,6 +146,6 @@ coverage = Parallel(
     ),
 )
 
-ci = Parallel(flake_check, free_threaded, format_check, analyze)
+ci = Parallel(flake_check, free_threaded, format_check, analyze, type_check)
 
 _ = Config(default_task=check, github_task=ci, agent=Claude(fix=format, check=check))

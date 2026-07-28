@@ -16,10 +16,14 @@ license-files = ["LICENSE"]
 # is wired up in setup.py because setuptools does not yet support declaring
 # ext_modules in pyproject.toml.
 
-# The distribution is the extension and nothing else, so nothing is discovered.
+# jpstruct/ holds no Python: the extension is built as its __init__, and the
+# directory exists so that py.typed and the stub have somewhere to live.
 [tool.setuptools]
 py-modules = []
-packages = []
+packages = ["jpstruct"]
+
+[tool.setuptools.package-data]
+jpstruct = ["py.typed", "__init__.pyi"]
 
 [dependency-groups]
 dev = [

@@ -80,8 +80,8 @@ stdenvNoCC.mkDerivation {
     wheel unpack --dest "$NIX_BUILD_TOP/unpacked" ${baseWheel}/*.whl
     unpacked=("$NIX_BUILD_TOP"/unpacked/*/)
 
-    rm "''${unpacked[0]}"/jpstruct.*.so
-    cp "$NIX_BUILD_TOP/${moduleName}" "''${unpacked[0]}/${moduleName}"
+    rm "''${unpacked[0]}"/jpstruct/__init__.*.so
+    cp "$NIX_BUILD_TOP/${moduleName}" "''${unpacked[0]}/jpstruct/${moduleName}"
 
     mkdir -p "$out"
     wheel pack --dest-dir "$out" "''${unpacked[0]}"

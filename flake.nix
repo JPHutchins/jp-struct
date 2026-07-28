@@ -39,6 +39,7 @@
         root = ./.;
         fileset = lib.fileset.unions [
           ./src
+          ./jpstruct
           ./build_config.py
           ./setup.py
           ./pyproject.toml

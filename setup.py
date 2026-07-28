@@ -4,7 +4,9 @@ Run via camas (`uv run camas build`), or directly:
 
     python setup.py build_ext --inplace
 
-This produces `jpstruct.*.so` in the repo root, importable as `jpstruct`.
+This produces `jpstruct/__init__.*.so`, importable as `jpstruct`. The
+extension is the package's __init__ so that py.typed and the stub have a
+package directory to live in; there is no Python module in the import path.
 """
 
 import sys
@@ -20,6 +22,8 @@ from build_config import BUILD  # noqa: E402
 
 setup(
     ext_modules=[
-        Extension("jpstruct", list(BUILD.sources), extra_compile_args=list(BUILD.c_flags)),
+        Extension(
+            "jpstruct.__init__", list(BUILD.sources), extra_compile_args=list(BUILD.c_flags)
+        ),
     ],
 )
