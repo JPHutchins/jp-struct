@@ -19,13 +19,24 @@ PYTHONS = tuple(Path(".python-version").read_text().split())
 OLDEST = min(PYTHONS, key=lambda python: tuple(map(int, python.split("."))))
 NEWEST = max(PYTHONS, key=lambda python: tuple(map(int, python.split("."))))
 
-# --no-project: camas's dev group floors above the oldest interpreter here.
-UV = "uv run --no-project --managed-python --python {PY} --with setuptools --with pytest"
+# The tests member declares pytest and hypothesis, and supplies them: a
+# per-interpreter project environment is what keeps six of them from fighting
+# over the one .venv a workspace otherwise shares.
+PYTEST = (
+    "uv run --package jpstruct-tests --managed-python --python {PY} python -m pytest"
+)
+ENVIRONMENT_PER_INTERPRETER = {"UV_PROJECT_ENVIRONMENT": ".venvs/{PY}"}
+
+# setuptools is a build tool, not something the tests member should carry.
+BUILD = (
+    "uv run --no-project --managed-python --python {PY} --with setuptools"
+    " python setup.py build_ext --inplace"
+)
 
 NIX_INPUTS = ("src/", "nix/", "tools/", "tests/", "flake.nix", "flake.lock", "pyproject.toml")
 
-build = Task(UV + " python setup.py build_ext --inplace", mutates=True)
-pytest = Task(UV + " python -m pytest")
+build = Task(BUILD, mutates=True)
+pytest = Task(PYTEST, env=ENVIRONMENT_PER_INTERPRETER)
 # --no-sync: analyze reaches this from ci, and CI never installs the project.
 compile_flags = Task("uv run --no-sync python tools/compile_flags.py", mutates=True)
 
@@ -59,19 +70,46 @@ test = Parallel(Sequential(build, pytest), matrix={"PY": PYTHONS})
 # free-threaded wheels yet. A module that does not declare Py_mod_gil silently
 # re-enables the GIL, so the declaration needs a build that would notice.
 FREE_THREADED = "3.14t"
+
+# uv resolves a plain `--python 3.14` to a free-threaded interpreter as soon as
+# one is installed -- any patch, even with the default variant also installed --
+# so this one is kept in a root of its own where it cannot rebind the matrix.
+FREE_THREADED_ROOT = {"UV_PYTHON_INSTALL_DIR": ".free-threaded-python"}
 free_threaded_build = Task(
-    UV.format(PY=FREE_THREADED) + " python setup.py build_ext --inplace", mutates=True
+    BUILD.format(PY=FREE_THREADED), mutates=True, env=FREE_THREADED_ROOT
 )
-free_threaded_pytest = Task(UV.format(PY=FREE_THREADED) + " python -m pytest")
+free_threaded_pytest = Task(
+    PYTEST.format(PY=FREE_THREADED),
+    env=FREE_THREADED_ROOT | {"UV_PROJECT_ENVIRONMENT": ".venvs/" + FREE_THREADED},
+)
 free_threaded = Sequential(free_threaded_build, free_threaded_pytest)
 benchmark = Sequential(Task("uv run python setup.py build_ext --inplace", mutates=True), bench)
 check = Parallel(test, free_threaded, format_check, analyze)
 
 # Installed, not compiled: MSVC has no __attribute__((cleanup)), so the Windows
 # leg cannot build this source at all.
+#
+# --no-project rather than the tests member, because this leg must not see the
+# workspace at all: jp-struct is a member of it, and uv resolves the name to the
+# source tree and compiles it instead of taking the wheel. Naming the two
+# dependencies is the cost -- uv run takes neither a pyproject.toml for
+# --with-requirements nor a member whose sources it is told to ignore.
+#
+# cwd, because the repo root is sys.path[0] and an in-place build leaves a
+# jpstruct.<abi>.so sitting there that shadows anything installed. That is what
+# JPSTRUCT_REQUIRE_INSTALLED makes the suite assert rather than assume.
+#
+# --no-cache, because the version is permanently 0.0.0: uv keys its cache on
+# name and version, so a rebuilt wheel is indistinguishable from one built
+# months ago and it serves the old archive. Neither --refresh-package nor
+# --reinstall-package dislodges it, and `uv cache clean` wants a lock no leaf
+# in a parallel tree can take. A real version would retire this flag.
 wheel_test = Task(
-    "uv run --no-project --managed-python --python {PY} --find-links result-wheels --with jp-struct"
-    " --with pytest python -m pytest"
+    "uv run --no-cache --no-project --managed-python --python {PY}"
+    " --find-links ../result-wheels"
+    " --with jp-struct --with pytest --with hypothesis python -m pytest .",
+    cwd=Path("tests"),
+    env={"JPSTRUCT_REQUIRE_INSTALLED": "1"},
 )
 
 # Sampled rather than crossed, to stay inside the OSS concurrency limit.

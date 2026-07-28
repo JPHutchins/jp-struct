@@ -175,6 +175,7 @@
                   (pkgs.python314.withPackages (ps: [
                     ps.pip
                     ps.pytest
+                    ps.hypothesis
                   ]))
                 ];
               }
@@ -182,7 +183,7 @@
                 pip install --no-index --no-deps --target=site \
                   ${forSystem.${system}.wheels."3.14-manylinux-x86_64"}/*.whl
                 export PYTHONPATH=$PWD/site
-                python -c 'import jpstruct; print("imported", jpstruct.__file__)'
+                export JPSTRUCT_REQUIRE_INSTALLED=1
                 python -m pytest -q -p no:cacheprovider ${./tests}
                 touch $out
               '';

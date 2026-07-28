@@ -10,3 +10,5 @@ dist/
 /result*
 
 compile_flags.txt
+/.free-threaded-python/
+/.venvs/
