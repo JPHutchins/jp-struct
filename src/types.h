@@ -2,6 +2,8 @@
 
 #include <Python.h>
 
+#include "options.h"
+
 /* PyMemberDef only became visible through Python.h in 3.12. */
 #if PY_VERSION_HEX < 0x030C0000
 #	include <structmember.h>
@@ -22,8 +24,14 @@ typedef struct {
 	/* malloc'd array[field_count] of slot offsets */
 	Py_ssize_t * struct_slot_offsets;
 
+	/* Resolved __post_init__, or NULL for a class that declares none */
+	PyObject * struct_post_init;
+
 	Py_ssize_t struct_field_count;
 	Py_ssize_t struct_default_count;
+
+	/* What the class body asked for, and what a subclass inherits */
+	struct options struct_options;
 } StructType;
 
 static inline StructType * struct_type_of(PyObject * const self) {

@@ -30,6 +30,7 @@ static enum result fill_defaults(
 	Py_ssize_t positional_count
 );
 static struct field_lookup find_field(StructType const * type, PyObject * name);
+static enum result run_post_init(StructType const * type, PyObject * self);
 
 /*
  * Instances are built straight into slot memory: allocate, then let each of
@@ -66,11 +67,28 @@ PyObject * Struct_vectorcall(
 	bind_positional(type, self, arguments, positional_count);
 
 	if (bind_keywords(type, self, arguments, positional_count, keyword_names) != RESULT_OK
-		|| fill_defaults(type, self, positional_count) != RESULT_OK) {
+		|| fill_defaults(type, self, positional_count) != RESULT_OK
+		|| run_post_init(type, self) != RESULT_OK) {
 		return NULL;
 	}
 
 	return py_move(&self);
+}
+
+/*
+ * The last thing the constructor does, so what it validates is a struct with
+ * every field already written. Frozen means it cannot assign one back --
+ * object.__setattr__ is the deliberate way through, as it is for a frozen
+ * dataclass.
+ */
+static enum result run_post_init(StructType const * const type, PyObject * const self) {
+	if (type->struct_post_init == NULL) {
+		return RESULT_OK;
+	}
+
+	PY_OWNED(returned, PyObject_CallOneArg(type->struct_post_init, self));
+
+	return returned != NULL ? RESULT_OK : RESULT_ERROR;
 }
 
 /* Positional arguments are in field order by definition, so this is a copy. */

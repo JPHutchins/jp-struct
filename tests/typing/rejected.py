@@ -18,6 +18,14 @@ class Mutable(Struct, frozen=False):
     value: int
 
 
+class Ordered(Struct, order=True):
+    rank: int
+
+
+class NoMatchArgs(Struct, match_args=False):
+    rank: int
+
+
 def a_frozen_field_may_not_be_assigned() -> None:
     Point(1, "two").x = 2  # type: ignore[misc]
 
@@ -50,3 +58,28 @@ def a_field_that_does_not_exist_is_rejected() -> None:
 
 def a_mutable_field_still_has_a_type() -> None:
     Mutable(1).value = "text"  # type: ignore[assignment]
+
+
+def a_struct_without_order_has_no_comparisons() -> None:
+    Point(1, "two") < Point(1, "two")  # type: ignore[operator]
+
+
+def ordering_against_an_unrelated_struct_is_rejected() -> None:
+    Ordered(1) < Point(1, "two")  # type: ignore[operator]
+
+
+def an_unknown_class_keyword_is_rejected() -> None:
+    """pyright's and ty's; mypy does not check keywords against __init_subclass__."""
+
+    class Typo(Struct, frozn=False):  # pyright: ignore[reportGeneralTypeIssues, reportCallIssue]
+        value: int
+
+
+def match_args_false_leaves_no_positional_pattern() -> None:
+    """pyright's alone: the stub declares __match_args__ as a tuple of unknown
+    length, which is all mypy reads, so it cannot count the sub-patterns.
+    """
+
+    match NoMatchArgs(1):
+        case NoMatchArgs(rank):  # pyright: ignore[reportGeneralTypeIssues]
+            print(rank)

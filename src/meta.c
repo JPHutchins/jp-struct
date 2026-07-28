@@ -5,6 +5,8 @@
 #include "construct.h"
 #include "fields.h"
 #include "meta.h"
+#include "mixin.h"
+#include "options.h"
 #include "owned.h"
 #include "result.h"
 #include "types.h"
@@ -12,12 +14,6 @@
 #ifndef Py_TPFLAGS_HAVE_VECTORCALL
 #	define Py_TPFLAGS_HAVE_VECTORCALL _Py_TPFLAGS_HAVE_VECTORCALL
 #endif
-
-/* Whether a class body asked to be mutable, and whether it was allowed to. */
-struct mutability {
-	enum { MUTABILITY_RESOLVED, MUTABILITY_REJECTED } tag;
-	bool frozen;
-};
 
 /* Where type.__new__ placed the slot it created for a field name. */
 struct member_lookup {
@@ -30,15 +26,24 @@ static int StructMeta_clear(PyObject * self);
 static void StructMeta_dealloc(PyObject * self);
 
 static StructType * find_struct_base(PyObject * bases);
-static struct mutability read_mutability(PyObject * keywords, StructType const * base);
-static bool inherits_frozen(StructType const * base);
-static enum result make_mutable(PyObject * namespace);
+static bool has_weakref_slot(StructType const * base);
 static PyObject * build_class_namespace(
 	PyObject * original_namespace,
 	PyObject * all_names,
 	PyObject * new_names,
-	bool frozen
+	struct options options,
+	struct options inherited,
+	bool base_has_weakref
 );
+static PyObject * build_slots(PyObject * new_names, bool weakref);
+static enum result set_match_args(PyObject * namespace, PyObject * all_names, bool wanted);
+static enum result apply_options(
+	PyObject * namespace,
+	struct options options,
+	struct options inherited
+);
+static enum result rebind(PyObject * namespace, char const * const * names, bool from_mixin);
+static enum result bind_hash(PyObject * namespace, struct options options);
 static enum result drop_class_variables(PyObject * namespace, PyObject * new_names);
 static StructType * create_class(
 	PyTypeObject * metatype,
@@ -49,8 +54,10 @@ static StructType * create_class(
 static enum result install_fields(
 	StructType * struct_class,
 	StructType const * base,
-	struct field_plan const * plan
+	struct field_plan const * plan,
+	struct options options
 );
+static enum result install_post_init(StructType * struct_class);
 static Py_ssize_t * resolve_slot_offsets(
 	StructType * struct_class,
 	StructType const * base,
@@ -135,9 +142,11 @@ PyObject * StructMeta_new(
 	}
 
 	StructType const * const base = find_struct_base(bases);
-	struct mutability const mutability = read_mutability(keywords, base);
+	struct options const inherited = base != NULL ? base->struct_options : options_initial();
+	struct options_request const request =
+		options_read(keywords, inherited, base != NULL && base->struct_field_count > 0);
 
-	if (mutability.tag == MUTABILITY_REJECTED) {
+	if (request.tag == OPTIONS_REJECTED) {
 		return NULL;
 	}
 
@@ -150,13 +159,19 @@ PyObject * StructMeta_new(
 	PY_OWNED(
 		namespace,
 		build_class_namespace(
-			original_namespace, plan.all_names, plan.new_names, mutability.frozen
+			original_namespace,
+			plan.all_names,
+			plan.new_names,
+			request.options,
+			inherited,
+			has_weakref_slot(base)
 		)
 	);
 	StructType * struct_class =
 		namespace != NULL ? create_class(metatype, name, bases, namespace) : NULL;
 
-	if (struct_class != NULL && install_fields(struct_class, base, &plan) != RESULT_OK) {
+	if (struct_class != NULL
+		&& install_fields(struct_class, base, &plan, request.options) != RESULT_OK) {
 		Py_CLEAR(struct_class);
 	}
 
@@ -165,94 +180,13 @@ PyObject * StructMeta_new(
 	return (PyObject *) struct_class;
 }
 
-/*
- * `frozen` is the only class keyword; anything else is a typo, and silently
- * ignoring it would leave a struct frozen when the body said otherwise.
- *
- * Mutability is inherited, and disagreeing with the base is refused rather than
- * resolved: a subclass that unfreezes its base hands out a mutable object to
- * everything holding a reference of the base's type. A base with no fields
- * imposes nothing -- there is nothing to mutate -- which is what lets a first
- * subclass of Struct ask to be mutable at all.
- */
-static struct mutability read_mutability(PyObject * const keywords, StructType const * const base) {
-	bool const inherited = inherits_frozen(base);
-
-	if (keywords == NULL || PyDict_GET_SIZE(keywords) == 0) {
-		return (struct mutability) { .tag = MUTABILITY_RESOLVED, .frozen = inherited };
-	}
-
-	PyObject * const requested = PyDict_GetItemString(keywords, "frozen");
-
-	if (requested == NULL || PyDict_GET_SIZE(keywords) != 1) {
-		PyErr_SetString(
-			PyExc_TypeError, "the only class keyword a struct takes is 'frozen'"
-		);
-
-		return (struct mutability) { .tag = MUTABILITY_REJECTED };
-	}
-
-	int const frozen = PyObject_IsTrue(requested);
-
-	if (frozen < 0) {
-		return (struct mutability) { .tag = MUTABILITY_REJECTED };
-	}
-
-	if (base != NULL && (frozen != 0) != inherited) {
-		PyErr_Format(
-			PyExc_TypeError,
-			"%s struct cannot inherit from a %s one",
-			frozen != 0 ? "a frozen" : "a mutable",
-			inherited ? "frozen" : "mutable"
-		);
-
-		return (struct mutability) { .tag = MUTABILITY_REJECTED };
-	}
-
-	return (struct mutability) { .tag = MUTABILITY_RESOLVED, .frozen = frozen != 0 };
-}
-
-/* Frozen is the default, and what the mixin's tp_setattro enforces; a mutable
- * class is the one that replaced it with the generic implementation. */
-static bool inherits_frozen(StructType const * const base) {
-	return base == NULL || base->heap_type.ht_type.tp_setattro != PyObject_GenericSetAttr;
-}
-
-/*
- * Bound in the namespace rather than written to the slots afterwards: the type
- * machinery derives tp_setattro and tp_hash from what the class body defines,
- * so assigning the slots directly would leave __setattr__ still resolving to
- * the mixin's while `instance.field = value` took the generic path.
- */
-static enum result make_mutable(PyObject * const namespace) {
-	PyObject * const object_type = (PyObject *) &PyBaseObject_Type;
-
-	for (char const * const * name = (char const *[]){ "__setattr__", "__delattr__", NULL };
-		 *name != NULL;
-		 ++name) {
-		PY_OWNED(generic, PyObject_GetAttrString(object_type, *name));
-
-		if (generic == NULL || PyDict_SetItemString(namespace, *name, generic) < 0) {
-			return RESULT_ERROR;
-		}
-	}
-
-	/* A value whose hash would move under its own key is not a key. */
-	if (PyDict_GetItemString(namespace, "__hash__") == NULL
-		&& PyDict_SetItemString(namespace, "__hash__", Py_None) < 0) {
-		return RESULT_ERROR;
-	}
-
-	return RESULT_OK;
-}
-
-/* Find the (single) struct base among ``bases``, or NULL if none has fields. */
+/* Find the (single) struct base among ``bases``. A fieldless one still carries
+ * the options a subclass inherits, so it counts. */
 static StructType * find_struct_base(PyObject * const bases) {
 	for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(bases); ++i) {
 		PyObject * const base = PyTuple_GET_ITEM(bases, i);
 
-		if (PyObject_TypeCheck(base, &StructMeta_Type)
-			&& ((StructType *) base)->struct_field_count > 0) {
+		if (PyObject_TypeCheck(base, &StructMeta_Type)) {
 			return (StructType *) base;
 		}
 	}
@@ -260,30 +194,163 @@ static StructType * find_struct_base(PyObject * const bases) {
 	return NULL;
 }
 
+/* CPython refuses a second __weakref__ in a subclass, so an inherited one is
+ * what `weakref=True` already got. */
+static bool has_weakref_slot(StructType const * const base) {
+	return base != NULL && base->heap_type.ht_type.tp_weaklistoffset != 0;
+}
+
 /* The namespace handed to type.__new__: a copy of the original with the
  * default-bearing field names removed (so __slots__ won't clash with a class
- * variable) plus __slots__ / __match_args__. */
+ * variable) plus __slots__ / __match_args__ and whatever the options replace. */
 static PyObject * build_class_namespace(
 	PyObject * const original_namespace,
 	PyObject * const all_names,
 	PyObject * const new_names,
-	bool const frozen
+	struct options const options,
+	struct options const inherited,
+	bool const base_has_weakref
 ) {
-	PY_OWNED(slots, PyList_AsTuple(new_names));
-	PY_OWNED(match_args, PyList_AsTuple(all_names));
+	PY_OWNED(slots, build_slots(new_names, options.weakref && !base_has_weakref));
 	PY_MOVABLE(namespace, PyDict_Copy(original_namespace));
 
 	if (slots != NULL
-		&& match_args != NULL
 		&& namespace != NULL
 		&& drop_class_variables(namespace, new_names) == RESULT_OK
 		&& PyDict_SetItemString(namespace, "__slots__", slots) == 0
-		&& PyDict_SetItemString(namespace, "__match_args__", match_args) == 0
-		&& (frozen || make_mutable(namespace) == RESULT_OK)) {
+		&& set_match_args(namespace, all_names, options.match_args) == RESULT_OK
+		&& apply_options(namespace, options, inherited) == RESULT_OK) {
 		return py_move(&namespace);
 	}
 
 	return NULL;
+}
+
+/* __weakref__ is a slot like any other; a class that wants to be the target of
+ * a weak reference asks for one. */
+static PyObject * build_slots(PyObject * const new_names, bool const weakref) {
+	PY_OWNED(names, PySequence_List(new_names));
+
+	if (names == NULL) {
+		return NULL;
+	}
+
+	if (weakref) {
+		PY_OWNED(weakref_name, PyUnicode_FromString("__weakref__"));
+
+		if (weakref_name == NULL || PyList_Append(names, weakref_name) < 0) {
+			return NULL;
+		}
+	}
+
+	return PyList_AsTuple(names);
+}
+
+/* Left unset rather than emptied, so a subclass that opts out still matches
+ * positionally on whatever its base declared -- as a dataclass does. */
+static enum result set_match_args(
+	PyObject * const namespace,
+	PyObject * const all_names,
+	bool const wanted
+) {
+	if (!wanted) {
+		return RESULT_OK;
+	}
+
+	PY_OWNED(match_args, PyList_AsTuple(all_names));
+
+	return match_args != NULL
+			&& PyDict_SetItemString(namespace, "__match_args__", match_args) == 0
+		? RESULT_OK
+		: RESULT_ERROR;
+}
+
+/*
+ * An option is off when object answers the name and on when the mixin does, so
+ * turning one on is as much work as turning it off: a subclass of a class that
+ * opted out inherits that class's bindings, not the mixin's, and only an
+ * explicit rebind gets the behaviour back.
+ *
+ * Bound in the namespace rather than written to the slots afterwards: the type
+ * machinery derives tp_setattro, tp_richcompare, tp_hash and tp_repr from what
+ * the class body defines, so assigning a slot directly would leave the dunder
+ * still resolving one way while the operator took the other.
+ */
+static enum result apply_options(
+	PyObject * const namespace,
+	struct options const options,
+	struct options const inherited
+) {
+	/* All six, not just __eq__: they share tp_richcompare, and a class that
+	 * rebinds only some of them gets the dispatching slot with the other source
+	 * still answering the rest. */
+	static char const * const comparison[] = {
+		"__eq__", "__ne__", "__lt__", "__le__", "__gt__", "__ge__", NULL
+	};
+	static char const * const representation[] = { "__repr__", NULL };
+	static char const * const mutability[] = { "__setattr__", "__delattr__", NULL };
+
+	if (options.eq != inherited.eq && rebind(namespace, comparison, options.eq) != RESULT_OK) {
+		return RESULT_ERROR;
+	}
+
+	if (options.repr != inherited.repr
+		&& rebind(namespace, representation, options.repr) != RESULT_OK) {
+		return RESULT_ERROR;
+	}
+
+	if (options.frozen != inherited.frozen
+		&& rebind(namespace, mutability, options.frozen) != RESULT_OK) {
+		return RESULT_ERROR;
+	}
+
+	return bind_hash(namespace, options);
+}
+
+/* A name the class body defined is neither source's to take. */
+static enum result rebind(
+	PyObject * const namespace,
+	char const * const * const names,
+	bool const from_mixin
+) {
+	PyObject * const source =
+		from_mixin ? (PyObject *) &StructMixin_Type : (PyObject *) &PyBaseObject_Type;
+
+	for (char const * const * name = names; *name != NULL; ++name) {
+		if (PyDict_GetItemString(namespace, *name) != NULL) {
+			continue;
+		}
+
+		PY_OWNED(bound, PyObject_GetAttrString(source, *name));
+
+		if (bound == NULL || PyDict_SetItemString(namespace, *name, bound) < 0) {
+			return RESULT_ERROR;
+		}
+	}
+
+	return RESULT_OK;
+}
+
+/*
+ * The hash follows from the other two answers rather than being an option of
+ * its own: the tuple of the fields for a frozen value, object's identity hash
+ * where equality is identity, and None for a value that compares by value and
+ * can still move -- a key whose hash moves is not a key. Settled outright
+ * rather than on a transition, because it is the one name two options answer.
+ */
+static enum result bind_hash(PyObject * const namespace, struct options const options) {
+	if (PyDict_GetItemString(namespace, "__hash__") != NULL) {
+		return RESULT_OK;
+	}
+
+	if (options.eq && !options.frozen) {
+		return PyDict_SetItemString(namespace, "__hash__", Py_None) == 0 ? RESULT_OK
+																		 : RESULT_ERROR;
+	}
+
+	static char const * const hash_name[] = { "__hash__", NULL };
+
+	return rebind(namespace, hash_name, options.eq);
 }
 
 /* A field with a default is bound in the class body, where it would collide
@@ -320,7 +387,8 @@ static StructType * create_class(
 static enum result install_fields(
 	StructType * const struct_class,
 	StructType const * const base,
-	struct field_plan const * const plan
+	struct field_plan const * const plan,
+	struct options const options
 ) {
 	PY_MOVABLE(field_names, PyList_AsTuple(plan->all_names));
 
@@ -341,7 +409,32 @@ static enum result install_fields(
 	struct_class->struct_slot_offsets = offsets;
 	struct_class->struct_field_count = field_count;
 	struct_class->struct_default_count = PyTuple_GET_SIZE(plan->defaults);
+	struct_class->struct_options = options;
 	struct_class->heap_type.ht_type.tp_vectorcall = Struct_vectorcall;
+
+	return install_post_init(struct_class);
+}
+
+/*
+ * Resolved once, here, rather than looked up per construction: the constructor
+ * writes slots and returns, and an MRO walk on every instance would be the
+ * largest thing in it. The cost is that a __post_init__ bound to the class
+ * after it exists is not seen.
+ */
+static enum result install_post_init(StructType * const struct_class) {
+	PyObject * const hook = PyObject_GetAttrString((PyObject *) struct_class, "__post_init__");
+
+	if (hook != NULL) {
+		struct_class->struct_post_init = hook;
+
+		return RESULT_OK;
+	}
+
+	if (!PyErr_ExceptionMatches(PyExc_AttributeError)) {
+		return RESULT_ERROR;
+	}
+
+	PyErr_Clear();
 
 	return RESULT_OK;
 }
@@ -389,10 +482,6 @@ static Py_ssize_t * resolve_slot_offsets(
 	return offsets;
 }
 
-static PyObject * StructMeta_get_field_names(PyObject * self, void * closure);
-static PyObject * StructMeta_get_defaults(PyObject * self, void * closure);
-static PyGetSetDef StructMeta_getset[];
-
 static struct member_lookup find_member(
 	PyMemberDef const * const members,
 	Py_ssize_t const member_count,
@@ -416,12 +505,17 @@ static int StructMeta_traverse(PyObject * const self, visitproc const visit, voi
 
 	Py_VISIT(struct_class->struct_field_names);
 	Py_VISIT(struct_class->struct_defaults);
+	Py_VISIT(struct_class->struct_post_init);
 
 	return PyType_Type.tp_traverse(self, visit, arg);
 }
 
 static int StructMeta_clear(PyObject * const self) {
 	StructType * const struct_class = (StructType *) self;
+
+	/* Ahead of the guard: a class whose creation failed after the hook was
+	 * resolved has one to drop and no fields. */
+	Py_CLEAR(struct_class->struct_post_init);
 
 	if (struct_class->struct_field_names == NULL) {  /* already cleared */
 		return RESULT_OK;

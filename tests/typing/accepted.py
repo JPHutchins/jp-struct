@@ -27,6 +27,14 @@ class Explicit(Struct, frozen=True):
     value: int
 
 
+class Ordered(Struct, order=True):
+    rank: int
+
+
+class Options(Struct, eq=True, repr=False, match_args=False, weakref=True):
+    value: int
+
+
 def the_constructor_is_synthesised_from_the_annotations() -> None:
     assert_type(Point(1, "two").x, int)
     assert_type(Point(1, "two").y, str)
@@ -64,3 +72,19 @@ def a_struct_is_a_struct() -> None:
 
     take(Point(1, "two"))
     take(Explicit(1))
+
+
+def order_synthesises_the_comparisons() -> None:
+    assert_type(Ordered(1) < Ordered(2), bool)
+    assert_type(Ordered(1) <= Ordered(2), bool)
+    assert_type(Ordered(1) > Ordered(2), bool)
+    assert_type(Ordered(1) >= Ordered(2), bool)
+    assert_type(sorted([Ordered(1), Ordered(2)]), list[Ordered])
+
+
+def the_options_a_checker_cannot_see_are_still_accepted() -> None:
+    """eq, repr, match_args and weakref have no type-level meaning; declaring
+    them on __init_subclass__ is what keeps the class definition from erroring.
+    """
+
+    assert_type(Options(1).value, int)

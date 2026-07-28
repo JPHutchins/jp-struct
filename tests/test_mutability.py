@@ -1,4 +1,4 @@
-"""`frozen=` is the only class keyword, and frozen is the default.
+"""Frozen is the default, and the only option a base refuses to differ on.
 
 Spelled `frozen=False` rather than `mutable=True` because PEP 681 fixes the
 names a dataclass_transform base may accept: a custom keyword is invisible to a
@@ -151,13 +151,30 @@ def test_a_base_with_no_fields_imposes_nothing():
     assert instance.x == 9
 
 
-def test_frozen_is_the_only_class_keyword():
-    with pytest.raises(TypeError, match="only class keyword"):
+def test_a_fieldless_base_still_carries_its_mutability():
+    """It imposes nothing, but a child that says nothing inherits it."""
 
-        class Typo(Struct, frozn=False):
-            x: int
+    class Fieldless(Struct, frozen=False):
+        pass
 
-    with pytest.raises(TypeError, match="only class keyword"):
+    class Child(Fieldless):
+        x: int
 
-        class Unsupported(Struct, kw_only=True):
-            x: int
+    instance = Child(1)
+    instance.x = 9
+
+    assert instance.x == 9
+    assert Child.__hash__ is None
+
+
+def test_a_child_of_a_fieldless_mutable_base_may_freeze_itself():
+    class Fieldless(Struct, frozen=False):
+        pass
+
+    class Child(Fieldless, frozen=True):
+        x: int
+
+    with pytest.raises(TypeError, match="does not support attribute assignment"):
+        Child(1).x = 9
+
+    assert hash(Child(1)) == hash((1,))

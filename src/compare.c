@@ -11,7 +11,10 @@ enum comparison {
 	COMPARISON_EQUAL = 1,
 };
 
+static PyObject * equality_result(PyObject * self, PyObject * other, int op);
+static PyObject * ordering_result(PyObject * self, PyObject * other, int op);
 static enum comparison structs_equal(PyObject * self, PyObject * other);
+static enum comparison names_equal(StructType const * self_type, StructType const * other_type);
 static enum comparison values_equal(
 	StructType const * self_type,
 	PyObject * self,
@@ -20,10 +23,15 @@ static enum comparison values_equal(
 );
 
 PyObject * Struct_rich_compare(PyObject * const self, PyObject * const other, int const op) {
-	if ((op != Py_EQ && op != Py_NE) || !PyObject_TypeCheck(other, &StructMixin_Type)) {
+	if (!PyObject_TypeCheck(other, &StructMixin_Type)) {
 		Py_RETURN_NOTIMPLEMENTED;
 	}
 
+	return op == Py_EQ || op == Py_NE ? equality_result(self, other, op)
+									  : ordering_result(self, other, op);
+}
+
+static PyObject * equality_result(PyObject * const self, PyObject * const other, int const op) {
 	switch (structs_equal(self, other)) {
 		case COMPARISON_ERROR:
 			return NULL;
@@ -36,19 +44,66 @@ PyObject * Struct_rich_compare(PyObject * const self, PyObject * const other, in
 	Py_UNREACHABLE();
 }
 
+/*
+ * Structural, exactly as equality is: matching field names, then the values
+ * decide, lexicographically -- the same order the tuple of those values would
+ * compare in. Both classes have to have asked for ordering, because a class
+ * that did not is not orderable, and being compared against one that did does
+ * not change that.
+ */
+static PyObject * ordering_result(PyObject * const self, PyObject * const other, int const op) {
+	StructType const * const self_type = struct_type_of(self);
+	StructType const * const other_type = struct_type_of(other);
+
+	if (!self_type->struct_options.order || !other_type->struct_options.order) {
+		Py_RETURN_NOTIMPLEMENTED;
+	}
+
+	switch (names_equal(self_type, other_type)) {
+		case COMPARISON_ERROR:
+			return NULL;
+		case COMPARISON_UNEQUAL:
+			Py_RETURN_NOTIMPLEMENTED;
+		case COMPARISON_EQUAL:
+			break;
+	}
+
+	for (Py_ssize_t i = 0; i < self_type->struct_field_count; ++i) {
+		PyObject * const mine = struct_slot_or_none(self_type, self, i);
+		PyObject * const theirs = struct_slot_or_none(other_type, other, i);
+		int const equal = PyObject_RichCompareBool(mine, theirs, Py_EQ);
+
+		if (equal == COMPARISON_ERROR) {
+			return NULL;
+		}
+
+		if (equal == COMPARISON_UNEQUAL) {
+			return PyObject_RichCompare(mine, theirs, op);
+		}
+	}
+
+	return PyBool_FromLong(op == Py_LE || op == Py_GE);
+}
+
 /* Structural: equal iff the field-name tuples match and every value
  * compares equal.  Nominal type identity is deliberately not required. */
 static enum comparison structs_equal(PyObject * const self, PyObject * const other) {
 	StructType const * const self_type = struct_type_of(self);
 	StructType const * const other_type = struct_type_of(other);
+	enum comparison const named_alike = names_equal(self_type, other_type);
 
-	int const names_equal = PyObject_RichCompareBool(
+	return named_alike != COMPARISON_EQUAL
+		? named_alike
+		: values_equal(self_type, self, other_type, other);
+}
+
+static enum comparison names_equal(
+	StructType const * const self_type,
+	StructType const * const other_type
+) {
+	return PyObject_RichCompareBool(
 		self_type->struct_field_names, other_type->struct_field_names, Py_EQ
 	);
-
-	return names_equal != COMPARISON_EQUAL
-		? names_equal
-		: values_equal(self_type, self, other_type, other);
 }
 
 static enum comparison values_equal(

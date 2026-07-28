@@ -22,6 +22,7 @@ BUILD: Final = BuildConfig(
         "src/hash.c",
         "src/meta.c",
         "src/mixin.c",
+        "src/options.c",
         "src/repr.c",
     ),
     # -Wno-unused-parameter: CPython slot signatures are fixed by the API and

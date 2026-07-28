@@ -164,3 +164,41 @@ def test_discarding_a_class_releases_its_defaults():
     gc.collect()
 
     assert sys.getrefcount(sentinel) == before
+
+
+def test_discarding_a_class_releases_its_post_init():
+    """The class holds the hook it resolved, so it has one more to give back."""
+
+    def hook(self: object) -> None:
+        return None
+
+    before = sys.getrefcount(hook)
+
+    class Temporary(Struct):
+        a: object
+        __post_init__ = hook
+
+    assert sys.getrefcount(hook) > before
+
+    del Temporary
+    gc.collect()
+
+    assert sys.getrefcount(hook) == before
+
+
+def test_a_post_init_that_raises_releases_the_fields_it_already_saw():
+    class Rejects(Struct):
+        a: object
+
+        def __post_init__(self) -> None:
+            raise ValueError("no")
+
+    sentinel = Sentinel()
+    before = sys.getrefcount(sentinel)
+
+    with pytest.raises(ValueError, match="no"):
+        Rejects(sentinel)
+
+    gc.collect()
+
+    assert sys.getrefcount(sentinel) == before

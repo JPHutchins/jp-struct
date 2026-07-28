@@ -28,6 +28,13 @@ jpstruct = ["py.typed", "__init__.pyi"]
 [dependency-groups]
 dev = ["setuptools>=77", "camas[mcp]==0.1.29"]
 
+[tool.pyright]
+# The mirror of mypy's --warn-unused-ignores. tests/typing/rejected.py asserts a
+# diagnostic by suppressing it, so a suppression that stops being needed has to
+# be an error itself or the assertion is not one -- and the divergences between
+# the checkers mean some of those suppressions are pyright's alone.
+reportUnnecessaryTypeIgnoreComment = "error"
+
 [tool.uv.workspace]
 members = ["bench", "tests", "tools"]
 
