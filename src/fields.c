@@ -202,3 +202,90 @@ static PyObject * build_defaults(PyObject * const all_names, PyObject * const de
 
 	return defaults;
 }
+
+#ifdef TESTING
+
+#	include "testing.h"
+
+/* build_defaults takes plain lists and dicts, so it is testable without a class
+ * -- and the ordering rule is easier to state here than through a class body. */
+static PyObject * names_of(char const * const * const names, Py_ssize_t const count) {
+	PyObject * const list = PyList_New(0);
+
+	for (Py_ssize_t i = 0; i < count; ++i) {
+		PyObject * const name = PyUnicode_FromString(names[i]);
+
+		PyList_Append(list, name);
+		Py_DECREF(name);
+	}
+
+	return list;
+}
+
+static PyObject * defaults_for(char const * const * const names, Py_ssize_t const count) {
+	PyObject * const mapping = PyDict_New();
+
+	for (Py_ssize_t i = 0; i < count; ++i) {
+		PyObject * const value = PyLong_FromSsize_t(i);
+
+		PyDict_SetItemString(mapping, names[i], value);
+		Py_DECREF(value);
+	}
+
+	return mapping;
+}
+
+static void test_no_defaults_produces_an_empty_tuple(void) {
+	char const * const names[] = { "a", "b" };
+	PyObject * const all_names = names_of(names, 2);
+	PyObject * const by_name = defaults_for(names, 0);
+	PyObject * const defaults = build_defaults(all_names, by_name);
+
+	TEST_ASSERT_NOT_NULL(defaults);
+	TEST_ASSERT_EQUAL_INT(0, PyTuple_GET_SIZE(defaults));
+
+	Py_DECREF(defaults);
+	Py_DECREF(by_name);
+	Py_DECREF(all_names);
+}
+
+static void test_only_the_trailing_run_becomes_defaults(void) {
+	char const * const names[] = { "a", "b", "c" };
+	char const * const defaulted[] = { "b", "c" };
+	PyObject * const all_names = names_of(names, 3);
+	PyObject * const by_name = defaults_for(defaulted, 2);
+	PyObject * const defaults = build_defaults(all_names, by_name);
+
+	TEST_ASSERT_NOT_NULL(defaults);
+	TEST_ASSERT_EQUAL_INT(2, PyTuple_GET_SIZE(defaults));
+
+	Py_DECREF(defaults);
+	Py_DECREF(by_name);
+	Py_DECREF(all_names);
+}
+
+static void test_a_required_field_after_a_default_is_rejected(void) {
+	char const * const names[] = { "a", "b" };
+	char const * const defaulted[] = { "a" };
+	PyObject * const all_names = names_of(names, 2);
+	PyObject * const by_name = defaults_for(defaulted, 1);
+	PyObject * const defaults = build_defaults(all_names, by_name);
+
+	TEST_ASSERT_NULL(defaults);
+	TEST_ASSERT_TRUE(PyErr_ExceptionMatches(PyExc_TypeError));
+
+	PyErr_Clear();
+	Py_DECREF(by_name);
+	Py_DECREF(all_names);
+}
+
+void fields_tests(void) {
+	/* Unity takes its file from UNITY_BEGIN, which is the runner's. */
+	Unity.TestFile = __FILE__;
+
+	RUN_TEST(test_no_defaults_produces_an_empty_tuple);
+	RUN_TEST(test_only_the_trailing_run_becomes_defaults);
+	RUN_TEST(test_a_required_field_after_a_default_is_rejected);
+}
+
+#endif

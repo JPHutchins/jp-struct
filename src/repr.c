@@ -69,3 +69,55 @@ static PyObject * field_repr(
 		"%U=%U", PyTuple_GET_ITEM(type->struct_field_names, index), rendered
 	);
 }
+
+#ifdef TESTING
+
+#	include "testing.h"
+
+/*
+ * A slot is NULL only while a constructor is part way through, and a half-built
+ * struct is never handed to Python -- so `<unset>` cannot be reached from a
+ * test written in Python. Reaching it means writing the NULL by hand, which is
+ * the whole reason these tests are here rather than in tests/.
+ */
+static void test_an_unwritten_slot_renders_as_unset(void) {
+	PyObject * const instance =
+		testing_evaluate("class P(Struct):\n    x: int\n    y: int\nresult = P(1, 2)\n");
+	StructType const * const type = struct_type_of(instance);
+	PyObject * * const slot = struct_slot(type, instance, 1);
+	PyObject * const written = *slot;
+
+	*slot = NULL;
+
+	PyObject * const rendered = field_repr(type, instance, 1);
+
+	*slot = written;
+
+	TEST_ASSERT_NOT_NULL(rendered);
+	TEST_ASSERT_EQUAL_STRING("y=<unset>", PyUnicode_AsUTF8(rendered));
+
+	Py_DECREF(rendered);
+	Py_DECREF(instance);
+}
+
+static void test_a_written_slot_renders_its_repr(void) {
+	PyObject * const instance =
+		testing_evaluate("class P(Struct):\n    x: int\nresult = P('value')\n");
+	PyObject * const rendered = field_repr(struct_type_of(instance), instance, 0);
+
+	TEST_ASSERT_NOT_NULL(rendered);
+	TEST_ASSERT_EQUAL_STRING("x='value'", PyUnicode_AsUTF8(rendered));
+
+	Py_DECREF(rendered);
+	Py_DECREF(instance);
+}
+
+void repr_tests(void) {
+	/* Unity takes its file from UNITY_BEGIN, which is the runner's. */
+	Unity.TestFile = __FILE__;
+
+	RUN_TEST(test_an_unwritten_slot_renders_as_unset);
+	RUN_TEST(test_a_written_slot_renders_its_repr);
+}
+
+#endif

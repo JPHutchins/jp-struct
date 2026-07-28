@@ -61,6 +61,10 @@ analyze = Sequential(compile_flags, Parallel(c_tidy, c_analyzer))
 
 bench = Project("bench")
 
+# Built by nix because they embed CPython: libpython and unity have to be on
+# the link line, and nix is where those paths come from.
+c_test = Task("nix build .#c-tests --no-link", when=NIX_INPUTS)
+
 wheels = Task("nix build .#default --out-link result-wheels", when=NIX_INPUTS, mutates=True)
 flake_check = Task("nix flake check", when=NIX_INPUTS)
 
@@ -84,7 +88,7 @@ free_threaded_pytest = Task(
 )
 free_threaded = Sequential(free_threaded_build, free_threaded_pytest)
 benchmark = Sequential(Task("uv run python setup.py build_ext --inplace", mutates=True), bench)
-check = Parallel(test, free_threaded, format_check, analyze)
+check = Parallel(test, free_threaded, format_check, analyze, c_test)
 
 # Installed, not compiled: MSVC has no __attribute__((cleanup)), so the Windows
 # leg cannot build this source at all.

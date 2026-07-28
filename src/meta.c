@@ -296,6 +296,57 @@ static int StructMeta_clear(PyObject * const self) {
 	return PyType_Type.tp_clear(self);
 }
 
+#ifdef TESTING
+
+#	include "testing.h"
+
+/* find_member reads a PyMemberDef array, which is trivially fabricated -- and
+ * the miss is the branch that turns into a RuntimeError nothing else exercises. */
+static PyMemberDef const example_members[] = {
+	{.name = "alpha", .offset = 16},
+	{.name = "beta", .offset = 24},
+	{.name = NULL},
+};
+
+static void test_a_declared_member_yields_its_offset(void) {
+	PyObject * const name = PyUnicode_FromString("beta");
+	struct member_lookup const found = find_member(example_members, 2, name);
+
+	TEST_ASSERT_EQUAL_INT(MEMBER_LOOKUP_FOUND, found.tag);
+	TEST_ASSERT_EQUAL_INT(24, found.offset);
+
+	Py_DECREF(name);
+}
+
+static void test_an_undeclared_member_is_missing(void) {
+	PyObject * const name = PyUnicode_FromString("gamma");
+	struct member_lookup const found = find_member(example_members, 2, name);
+
+	TEST_ASSERT_EQUAL_INT(MEMBER_LOOKUP_MISSING, found.tag);
+
+	Py_DECREF(name);
+}
+
+static void test_the_search_respects_the_declared_count(void) {
+	PyObject * const name = PyUnicode_FromString("beta");
+	struct member_lookup const found = find_member(example_members, 1, name);
+
+	TEST_ASSERT_EQUAL_INT(MEMBER_LOOKUP_MISSING, found.tag);
+
+	Py_DECREF(name);
+}
+
+void meta_tests(void) {
+	/* Unity takes its file from UNITY_BEGIN, which is the runner's. */
+	Unity.TestFile = __FILE__;
+
+	RUN_TEST(test_a_declared_member_yields_its_offset);
+	RUN_TEST(test_an_undeclared_member_is_missing);
+	RUN_TEST(test_the_search_respects_the_declared_count);
+}
+
+#endif
+
 static void StructMeta_dealloc(PyObject * const self) {
 	/* GC invariants require dealloc to untrack immediately, but
 	 * PyType_Type.tp_dealloc assumes the type is currently tracked — hence the

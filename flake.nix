@@ -47,6 +47,17 @@
         ];
       };
 
+      # The in-file tests read src/ and tests/c/ only, so touching them does not
+      # invalidate a single cross build.
+      testSource = lib.fileset.toSource {
+        root = ./.;
+        fileset = lib.fileset.unions [
+          ./src
+          ./tests/c
+          ./build_config.py
+        ];
+      };
+
       perSystem =
         system:
         let
@@ -75,6 +86,8 @@
           named = lib.mapAttrs' (name: wheel: lib.nameValuePair "wheel-${name}" wheel) wheels;
 
           jphfmt = pkgs.callPackage ./nix/jphfmt.nix { };
+
+          cTests = pkgs.callPackage ./nix/c-tests.nix { src = testSource; };
         in
         {
           inherit
@@ -83,6 +96,7 @@
             all
             named
             jphfmt
+            cTests
             ;
         };
 
@@ -94,7 +108,12 @@
     );
     {
       packages = forAllSystems (
-        system: forSystem.${system}.named // { default = forSystem.${system}.all; }
+        system:
+        forSystem.${system}.named
+        // {
+          default = forSystem.${system}.all;
+          c-tests = forSystem.${system}.cTests;
+        }
       );
 
       # The only supported environment: enter it once, then run camas (and any
@@ -138,10 +157,17 @@
       checks = forAllSystems (
         system:
         let
-          inherit (forSystem.${system}) pkgs all named;
+          inherit (forSystem.${system})
+            pkgs
+            all
+            named
+            cTests
+            ;
         in
         named
         // {
+          c-tests = cTests;
+
           nixfmt = pkgs.runCommand "nixfmt-check" { nativeBuildInputs = [ pkgs.nixfmt ]; } ''
             nixfmt --check ${./flake.nix} ${./nix/wheel.nix} ${./nix/python-targets.nix}
             touch $out
