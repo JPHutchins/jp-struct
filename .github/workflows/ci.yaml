@@ -32,7 +32,7 @@ jobs:
           purge-prefixes: nix-${{ runner.os }}-
           purge-created: 0
           purge-primary-key: never
-      - run: nix develop --command uv sync --no-install-project
+      - run: nix develop --command uv sync --no-install-workspace
       - run: nix develop --command uv run --no-sync camas ci
       - run: nix build .#default --out-link result-wheels
       - uses: actions/upload-artifact@v7
@@ -60,8 +60,9 @@ jobs:
         with:
           name: wheels
           path: result-wheels
-      # --no-install-project, because installing it means compiling it, and on
-      # Windows that is MSVC, which cannot build this source. The leg only needs
-      # camas; the wheel goes into an isolated environment the task creates.
-      - run: uv sync --no-install-project
+      # --no-install-workspace, because installing the project means compiling it,
+      # and on Windows that is MSVC, which cannot build this source. No workspace
+      # member may pull it in either. The leg needs only camas; the wheel goes into
+      # an isolated environment the task creates.
+      - run: uv sync --no-install-workspace
       - run: uv run --no-sync camas coverage --OS ${{ matrix.OS }} --PY ${{ matrix.PY }}

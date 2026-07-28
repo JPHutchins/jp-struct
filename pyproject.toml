@@ -19,13 +19,11 @@ license-files = ["LICENSE"]
 [dependency-groups]
 dev = [
     "setuptools>=77",            # build_ext
-    "pytest>=8",                 # tests
-    "msgspec>=0.21",             # bench: comparison target
-    # bench: comparison target (the `records` module); it floors at 3.11, which
-    # must not drag the library's own floor up with it.
-    "record-type>=2023.1.post1; python_version>='3.11'",
     "camas[mcp]==0.1.29",
 ]
+
+[tool.uv.workspace]
+members = ["bench", "tests", "tools"]
 
 [tool.jp-struct]
 # Read by setup.py for the local build and by nix/wheel.nix for the cross

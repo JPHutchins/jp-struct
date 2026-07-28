@@ -9,6 +9,14 @@ resolution-markers = [
     "python_full_version < '3.11'",
 ]
 
+[manifest]
+members = [
+    "jp-struct",
+    "jpstruct-bench",
+    "jpstruct-tests",
+    "jpstruct-tools",
+]
+
 [[package]]
 name = "annotated-types"
 version = "0.8.0"
@@ -366,9 +374,6 @@ source = { editable = "." }
 [package.dev-dependencies]
 dev = [
     { name = "camas", extra = ["mcp"] },
-    { name = "msgspec" },
-    { name = "pytest" },
-    { name = "record-type", marker = "python_full_version >= '3.11'" },
     { name = "setuptools" },
 ]
 
@@ -377,11 +382,39 @@ dev = [
 [package.metadata.requires-dev]
 dev = [
     { name = "camas", extras = ["mcp"], specifier = "==0.1.29" },
-    { name = "msgspec", specifier = ">=0.21" },
-    { name = "pytest", specifier = ">=8" },
-    { name = "record-type", marker = "python_full_version >= '3.11'", specifier = ">=2023.1.post1" },
     { name = "setuptools", specifier = ">=77" },
 ]
+
+[[package]]
+name = "jpstruct-bench"
+version = "0"
+source = { virtual = "bench" }
+dependencies = [
+    { name = "msgspec" },
+    { name = "record-type", marker = "python_full_version >= '3.11'" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "msgspec", specifier = ">=0.21" },
+    { name = "record-type", marker = "python_full_version >= '3.11'", specifier = ">=2023.1.post1" },
+]
+
+[[package]]
+name = "jpstruct-tests"
+version = "0"
+source = { virtual = "tests" }
+dependencies = [
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "pytest", specifier = ">=8" }]
+
+[[package]]
+name = "jpstruct-tools"
+version = "0"
+source = { virtual = "tools" }
 
 [[package]]
 name = "jsonschema"
