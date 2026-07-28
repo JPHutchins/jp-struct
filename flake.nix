@@ -149,11 +149,21 @@
 
           # Five of the six targets cannot run here, so every wheel is checked
           # for internal consistency and for a payload whose architecture and
-          # container match the tag it is published under.
-          wheels-verified = pkgs.runCommand "wheels-verified" { nativeBuildInputs = [ pkgs.python314 ]; } ''
-            python ${./tools/check_wheel.py} ${all}/*.whl
-            touch $out
-          '';
+          # container match the tag it is published under. twine is the gate
+          # PyPI itself applies; nothing off the shelf checks the payload.
+          wheels-verified =
+            pkgs.runCommand "wheels-verified"
+              {
+                nativeBuildInputs = [
+                  pkgs.python314
+                  pkgs.python3Packages.twine
+                ];
+              }
+              ''
+                python ${./tools/check_wheel.py} ${all}/*.whl
+                twine check --strict ${all}/*.whl
+                touch $out
+              '';
         }
         # The native wheel is the only one this builder can execute, so it is
         # the only one whose importability can actually be demonstrated.
