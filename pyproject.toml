@@ -8,7 +8,7 @@ version = "0.0.0"
 description = "A C-backed, inheritable Struct base class for Python — fast import, fast type creation"
 readme = "README.md"
 requires-python = ">=3.10"
-authors = [{ name = "JP Hutchins", email = "jp@intercreate.io" }]
+authors = [{ name = "JP Hutchins", email = "jphutchins@gmail.com" }]
 license = "MIT"
 license-files = ["LICENSE"]
 
@@ -26,10 +26,7 @@ packages = ["jpstruct"]
 jpstruct = ["py.typed", "__init__.pyi"]
 
 [dependency-groups]
-dev = [
-    "setuptools>=77",            # build_ext
-    "camas[mcp]==0.1.29",
-]
+dev = ["setuptools>=77", "camas[mcp]==0.1.29"]
 
 [tool.uv.workspace]
 members = ["bench", "tests", "tools"]
