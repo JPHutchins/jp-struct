@@ -54,8 +54,18 @@ wheels = Task("nix build .#default --out-link result-wheels", when=NIX_INPUTS, m
 flake_check = Task("nix flake check", when=NIX_INPUTS)
 
 test = Parallel(Sequential(build, pytest), matrix={"PY": PYTHONS})
+
+# Kept out of .python-version, which is also the wheel matrix, and there are no
+# free-threaded wheels yet. A module that does not declare Py_mod_gil silently
+# re-enables the GIL, so the declaration needs a build that would notice.
+FREE_THREADED = "3.14t"
+free_threaded_build = Task(
+    UV.format(PY=FREE_THREADED) + " python setup.py build_ext --inplace", mutates=True
+)
+free_threaded_pytest = Task(UV.format(PY=FREE_THREADED) + " python -m pytest")
+free_threaded = Sequential(free_threaded_build, free_threaded_pytest)
 benchmark = Sequential(Task("uv run python setup.py build_ext --inplace", mutates=True), bench)
-check = Parallel(test, format_check, analyze)
+check = Parallel(test, free_threaded, format_check, analyze)
 
 # Installed, not compiled: MSVC has no __attribute__((cleanup)), so the Windows
 # leg cannot build this source at all.
@@ -76,6 +86,6 @@ coverage = Parallel(
     ),
 )
 
-ci = Parallel(flake_check, format_check, analyze)
+ci = Parallel(flake_check, free_threaded, format_check, analyze)
 
 _ = Config(default_task=check, github_task=ci, agent=Claude(fix=format, check=check))

@@ -37,10 +37,20 @@ static int struct_exec(PyObject * module);
 static enum result add_struct_base(PyObject * module);
 static PyObject * create_struct_base(void);
 
+/*
+ * Everything shared between threads is written once and then only read: a
+ * type's field metadata at class creation, and an instance's slots before the
+ * constructor returns it. What writes a live instance is CPython's own member
+ * descriptor, so a free-threaded build's guarantees there are inherited rather
+ * than reimplemented.
+ */
 static PyModuleDef_Slot struct_slots[] = {
 	{Py_mod_exec, struct_exec},
 #ifdef Py_mod_multiple_interpreters
 	{Py_mod_multiple_interpreters, Py_MOD_MULTIPLE_INTERPRETERS_NOT_SUPPORTED},
+#endif
+#ifdef Py_mod_gil
+	{Py_mod_gil, Py_MOD_GIL_NOT_USED},
 #endif
 	{0, NULL},
 };

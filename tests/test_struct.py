@@ -8,6 +8,9 @@ single-base field inheritance, and metaclass identity.
 Run with `uv run camas test` (or `python -m pytest`).
 """
 
+import sys
+import sysconfig
+
 import pytest
 
 import jpstruct
@@ -133,6 +136,13 @@ def test_empty_struct():
 def test_metaclass_identity():
     assert type(Point2D) is jpstruct.StructMeta
     assert isinstance(Point2D(1.0, 2.0), Struct)
+
+
+@pytest.mark.skipif(
+    not sysconfig.get_config_var("Py_GIL_DISABLED"), reason="not a free-threaded build"
+)
+def test_importing_does_not_re_enable_the_gil():
+    assert not sys._is_gil_enabled()
 
 
 def test_module_of_the_exported_names():
