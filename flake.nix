@@ -39,8 +39,8 @@
         root = ./.;
         fileset = lib.fileset.unions [
           ./src
-          ./tools/pack_wheel.py
           ./build_config.py
+          ./setup.py
           ./pyproject.toml
           ./README.md
           ./LICENSE
@@ -63,12 +63,15 @@
         let
           pkgs = nixpkgs.legacyPackages.${system};
 
+          baseWheel = pkgs.callPackage ./nix/base-wheel.nix { src = buildSource; };
+
           wheels = lib.listToAttrs (
             map (
               { pythonMinor, platformName }:
               lib.nameValuePair "${pythonMinor}-${platformName}" (
                 pkgs.callPackage ./nix/wheel.nix {
                   src = buildSource;
+                  inherit baseWheel;
                   inherit (matrix) release;
                   inherit pythonMinor platformName;
                   python = matrix.pythons.${pythonMinor};

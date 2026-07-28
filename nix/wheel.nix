@@ -4,13 +4,19 @@
 # every target here, so a single Linux builder reaches Linux, macOS and Windows
 # without an SDK. The extension resolves Py* through the interpreter at load
 # time on ELF and Mach-O, so only Windows links an import library.
+#
+# Only the payload is ours: the metadata comes from a wheel setuptools built,
+# and the unpack/repack/retag is the `wheel` project's own. Nothing here writes
+# a RECORD or a WHEEL by hand.
 {
   lib,
   stdenvNoCC,
   fetchurl,
   zig,
   python3,
+  python3Packages,
   src,
+  baseWheel,
   release,
   pythonMinor,
   python,
@@ -39,6 +45,7 @@ stdenvNoCC.mkDerivation {
   nativeBuildInputs = [
     zig
     python3
+    python3Packages.wheel
   ];
 
   dontConfigure = true;
@@ -67,14 +74,22 @@ stdenvNoCC.mkDerivation {
       ${lib.escapeShellArgs platform.extraFlags} \
       -o "$NIX_BUILD_TOP/${moduleName}"
 
+    # The base wheel carries the metadata and a payload built for this builder;
+    # swap in the one just cross-compiled, then let `wheel` restate the tags and
+    # recompute RECORD.
+    wheel unpack --dest "$NIX_BUILD_TOP/unpacked" ${baseWheel}/*.whl
+    unpacked=("$NIX_BUILD_TOP"/unpacked/*/)
+
+    rm "''${unpacked[0]}"/jpstruct.*.so
+    cp "$NIX_BUILD_TOP/${moduleName}" "''${unpacked[0]}/${moduleName}"
+
     mkdir -p "$out"
-    python3 tools/pack_wheel.py \
-      --extension "$NIX_BUILD_TOP/${moduleName}" \
-      --extension-name ${lib.escapeShellArg moduleName} \
+    wheel pack --dest-dir "$out" "''${unpacked[0]}"
+    wheel tags --remove \
       --python-tag ${python.tag} \
       --abi-tag ${python.tag} \
       --platform-tag ${platform.platformTag} \
-      --outdir "$out"
+      "$out"/*.whl
 
     runHook postBuild
   '';
