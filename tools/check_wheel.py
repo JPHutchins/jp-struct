@@ -18,7 +18,6 @@ from typing import Iterator, NamedTuple
 
 ELF_MAGIC = b"\x7fELF"
 MACHO_64_MAGIC = b"\xcf\xfa\xed\xfe"
-INIT_SYMBOL = b"PyInit_record"
 
 
 class Shape(NamedTuple):
@@ -110,8 +109,16 @@ def check(path: Path) -> Iterator[Failure]:
     if actual != expected:
         yield Failure(path.name, f"{modules[0]} is {actual}, tag {platform_tag} implies {expected}")
 
-    if INIT_SYMBOL not in binary:
-        yield Failure(path.name, f"{modules[0]} does not contain {INIT_SYMBOL.decode()}")
+    symbol = init_symbol(modules[0])
+
+    if symbol not in binary:
+        yield Failure(path.name, f"{modules[0]} does not contain {symbol.decode()}")
+
+
+def init_symbol(module_file: str) -> bytes:
+    """A payload named for a module has to export that module's init function."""
+
+    return b"PyInit_" + module_file.split(".")[0].encode()
 
 
 def check_record(path: Path, archive: zipfile.ZipFile, record_name: str) -> Iterator[Failure]:
