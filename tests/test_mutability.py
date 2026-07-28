@@ -1,0 +1,163 @@
+"""`frozen=` is the only class keyword, and frozen is the default.
+
+Spelled `frozen=False` rather than `mutable=True` because PEP 681 fixes the
+names a dataclass_transform base may accept: a custom keyword is invisible to a
+type checker, which would then either reject every legitimate write to a
+mutable struct or stop rejecting them on a frozen one.
+"""
+
+import pytest
+from values import EVERY, identify
+
+from jpstruct import Struct
+
+
+class Frozen(Struct):
+    x: int
+    y: int = 2
+
+
+class Mutable(Struct, frozen=False):
+    x: int
+    y: int = 2
+
+
+def test_a_struct_is_frozen_unless_it_says_otherwise():
+    with pytest.raises(TypeError, match="does not support attribute assignment"):
+        Frozen(1).x = 9
+
+    with pytest.raises(TypeError, match="does not support attribute deletion"):
+        del Frozen(1).x
+
+
+def test_frozen_true_is_accepted_and_is_the_default_anyway():
+    class Explicit(Struct, frozen=True):
+        x: int
+
+    with pytest.raises(TypeError, match="does not support attribute assignment"):
+        Explicit(1).x = 9
+
+
+def test_a_mutable_struct_accepts_a_write():
+    instance = Mutable(1)
+    instance.x = 9
+
+    assert instance.x == 9
+
+
+@pytest.mark.parametrize("value", EVERY, ids=identify)
+def test_a_field_may_be_reassigned_to_any_value(value):
+    instance = Mutable(1)
+    instance.x = value
+
+    assert instance.x is value
+
+
+def test_a_mutable_struct_accepts_a_delete():
+    instance = Mutable(1)
+    del instance.x
+
+    with pytest.raises(AttributeError):
+        _ = instance.x
+
+
+def test_a_deleted_field_reads_as_unset_in_repr():
+    """The one way to reach that branch without writing the NULL from C."""
+
+    instance = Mutable(1, 2)
+    del instance.x
+
+    assert repr(instance) == "Mutable(x=<unset>, y=2)"
+
+
+def test_a_mutable_struct_still_rejects_a_name_that_is_not_a_field():
+    with pytest.raises(AttributeError):
+        Mutable(1).z = 9
+
+
+def test_writes_are_visible_to_equality_and_repr():
+    instance = Mutable(1)
+    instance.x = 5
+
+    assert instance == Mutable(5)
+    assert repr(instance) == "Mutable(x=5, y=2)"
+
+
+def test_a_mutable_struct_is_unhashable():
+    assert Mutable.__hash__ is None
+
+    with pytest.raises(TypeError, match="unhashable"):
+        hash(Mutable(1))
+
+
+def test_the_dunder_agrees_with_the_slot():
+    """Assigning tp_setattro directly would leave these two disagreeing."""
+
+    assert Mutable.__setattr__ is object.__setattr__
+    assert Mutable.__delattr__ is object.__delattr__
+    assert Frozen.__setattr__ is not object.__setattr__
+
+
+def test_a_frozen_struct_is_still_hashable_and_structural():
+    assert hash(Frozen(1)) == hash((1, 2))
+    assert Frozen(1) == Frozen(1, 2)
+
+
+def test_mutability_is_inherited():
+    class Child(Mutable):
+        z: int = 3
+
+    instance = Child(1, 2, 3)
+    instance.z = 9
+
+    assert instance.z == 9
+    assert Child.__hash__ is None
+
+
+def test_frozenness_is_inherited():
+    class Child(Frozen):
+        z: int = 3
+
+    with pytest.raises(TypeError, match="does not support attribute assignment"):
+        Child(1, 2, 3).z = 9
+
+
+def test_a_mutable_struct_may_not_inherit_from_a_frozen_one():
+    with pytest.raises(TypeError, match="mutable struct cannot inherit from a frozen one"):
+
+        class Child(Frozen, frozen=False):
+            pass
+
+
+def test_a_frozen_struct_may_not_inherit_from_a_mutable_one():
+    with pytest.raises(TypeError, match="frozen struct cannot inherit from a mutable one"):
+
+        class Child(Mutable, frozen=True):
+            pass
+
+
+def test_a_base_with_no_fields_imposes_nothing():
+    """Which is what lets a first subclass of Struct ask to be mutable at all."""
+
+    class Fieldless(Struct):
+        pass
+
+    class Child(Fieldless, frozen=False):
+        x: int
+
+    instance = Child(1)
+    instance.x = 9
+
+    assert instance.x == 9
+
+
+def test_frozen_is_the_only_class_keyword():
+    with pytest.raises(TypeError, match="only class keyword"):
+
+        class Typo(Struct, frozn=False):
+            x: int
+
+    with pytest.raises(TypeError, match="only class keyword"):
+
+        class Unsupported(Struct, kw_only=True):
+            x: int

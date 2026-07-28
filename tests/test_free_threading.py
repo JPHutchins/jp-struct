@@ -75,6 +75,24 @@ def test_concurrent_subclass_creation():
     run_on_every_thread(work)
 
 
+def test_concurrent_writes_to_a_shared_mutable_struct():
+    """Writes go through CPython's own member descriptor, so whatever a
+    free-threaded build guarantees for __slots__ is inherited rather than
+    reimplemented. This is the check on that claim."""
+
+    class Counter(Struct, frozen=False):
+        value: object
+
+    shared = Counter(0)
+
+    def work():
+        for i in range(ITERATIONS):
+            shared.value = i
+            assert isinstance(shared.value, int)
+
+    run_on_every_thread(work)
+
+
 def test_a_shared_struct_is_safe_to_read_from_every_thread():
     shared = Point(1, 2)
 

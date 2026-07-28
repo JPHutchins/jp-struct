@@ -75,10 +75,10 @@ static PyObject * field_repr(
 #	include "testing.h"
 
 /*
- * A slot is NULL only while a constructor is part way through, and a half-built
- * struct is never handed to Python -- so `<unset>` cannot be reached from a
- * test written in Python. Reaching it means writing the NULL by hand, which is
- * the whole reason these tests are here rather than in tests/.
+ * `del instance.field` reaches this branch on a mutable struct, and
+ * tests/test_mutability.py covers that. A frozen one cannot: its slot is NULL
+ * only part way through a constructor, and a half-built struct is never handed
+ * out. So the frozen case is reachable only by writing the NULL here.
  */
 static void test_an_unwritten_slot_renders_as_unset(void) {
 	PyObject * const instance =

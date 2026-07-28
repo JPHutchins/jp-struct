@@ -1,4 +1,5 @@
 #include <Python.h>
+#include <stdbool.h>
 #include <stddef.h>
 
 #include "construct.h"
@@ -12,6 +13,12 @@
 #	define Py_TPFLAGS_HAVE_VECTORCALL _Py_TPFLAGS_HAVE_VECTORCALL
 #endif
 
+/* Whether a class body asked to be mutable, and whether it was allowed to. */
+struct mutability {
+	enum { MUTABILITY_RESOLVED, MUTABILITY_REJECTED } tag;
+	bool frozen;
+};
+
 /* Where type.__new__ placed the slot it created for a field name. */
 struct member_lookup {
 	enum { MEMBER_LOOKUP_FOUND, MEMBER_LOOKUP_MISSING } tag;
@@ -23,10 +30,14 @@ static int StructMeta_clear(PyObject * self);
 static void StructMeta_dealloc(PyObject * self);
 
 static StructType * find_struct_base(PyObject * bases);
+static struct mutability read_mutability(PyObject * keywords, StructType const * base);
+static bool inherits_frozen(StructType const * base);
+static enum result make_mutable(PyObject * namespace);
 static PyObject * build_class_namespace(
 	PyObject * original_namespace,
 	PyObject * all_names,
-	PyObject * new_names
+	PyObject * new_names,
+	bool frozen
 );
 static enum result drop_class_variables(PyObject * namespace, PyObject * new_names);
 static StructType * create_class(
@@ -73,7 +84,7 @@ PyTypeObject StructMeta_Type = {
 PyObject * StructMeta_new(
 	PyTypeObject * const metatype,
 	PyObject * const args,
-	PyObject * const keywords  /* class keywords (frozen=, kw_only=, ...) not yet supported */
+	PyObject * const keywords
 ) {
 	PyObject * name;
 	PyObject * bases;
@@ -94,13 +105,24 @@ PyObject * StructMeta_new(
 	}
 
 	StructType const * const base = find_struct_base(bases);
+	struct mutability const mutability = read_mutability(keywords, base);
+
+	if (mutability.tag == MUTABILITY_REJECTED) {
+		return NULL;
+	}
+
 	struct field_plan plan = field_plan_build(base, original_namespace);
 
 	if (field_plan_failed(&plan)) {
 		return NULL;
 	}
 
-	PY_OWNED(namespace, build_class_namespace(original_namespace, plan.all_names, plan.new_names));
+	PY_OWNED(
+		namespace,
+		build_class_namespace(
+			original_namespace, plan.all_names, plan.new_names, mutability.frozen
+		)
+	);
 	StructType * struct_class =
 		namespace != NULL ? create_class(metatype, name, bases, namespace) : NULL;
 
@@ -111,6 +133,87 @@ PyObject * StructMeta_new(
 	field_plan_clear(&plan);
 
 	return (PyObject *) struct_class;
+}
+
+/*
+ * `frozen` is the only class keyword; anything else is a typo, and silently
+ * ignoring it would leave a struct frozen when the body said otherwise.
+ *
+ * Mutability is inherited, and disagreeing with the base is refused rather than
+ * resolved: a subclass that unfreezes its base hands out a mutable object to
+ * everything holding a reference of the base's type. A base with no fields
+ * imposes nothing -- there is nothing to mutate -- which is what lets a first
+ * subclass of Struct ask to be mutable at all.
+ */
+static struct mutability read_mutability(PyObject * const keywords, StructType const * const base) {
+	bool const inherited = inherits_frozen(base);
+
+	if (keywords == NULL || PyDict_GET_SIZE(keywords) == 0) {
+		return (struct mutability) { .tag = MUTABILITY_RESOLVED, .frozen = inherited };
+	}
+
+	PyObject * const requested = PyDict_GetItemString(keywords, "frozen");
+
+	if (requested == NULL || PyDict_GET_SIZE(keywords) != 1) {
+		PyErr_SetString(
+			PyExc_TypeError, "the only class keyword a struct takes is 'frozen'"
+		);
+
+		return (struct mutability) { .tag = MUTABILITY_REJECTED };
+	}
+
+	int const frozen = PyObject_IsTrue(requested);
+
+	if (frozen < 0) {
+		return (struct mutability) { .tag = MUTABILITY_REJECTED };
+	}
+
+	if (base != NULL && (frozen != 0) != inherited) {
+		PyErr_Format(
+			PyExc_TypeError,
+			"%s struct cannot inherit from a %s one",
+			frozen != 0 ? "a frozen" : "a mutable",
+			inherited ? "frozen" : "mutable"
+		);
+
+		return (struct mutability) { .tag = MUTABILITY_REJECTED };
+	}
+
+	return (struct mutability) { .tag = MUTABILITY_RESOLVED, .frozen = frozen != 0 };
+}
+
+/* Frozen is the default, and what the mixin's tp_setattro enforces; a mutable
+ * class is the one that replaced it with the generic implementation. */
+static bool inherits_frozen(StructType const * const base) {
+	return base == NULL || base->heap_type.ht_type.tp_setattro != PyObject_GenericSetAttr;
+}
+
+/*
+ * Bound in the namespace rather than written to the slots afterwards: the type
+ * machinery derives tp_setattro and tp_hash from what the class body defines,
+ * so assigning the slots directly would leave __setattr__ still resolving to
+ * the mixin's while `instance.field = value` took the generic path.
+ */
+static enum result make_mutable(PyObject * const namespace) {
+	PyObject * const object_type = (PyObject *) &PyBaseObject_Type;
+
+	for (char const * const * name = (char const *[]){ "__setattr__", "__delattr__", NULL };
+		 *name != NULL;
+		 ++name) {
+		PY_OWNED(generic, PyObject_GetAttrString(object_type, *name));
+
+		if (generic == NULL || PyDict_SetItemString(namespace, *name, generic) < 0) {
+			return RESULT_ERROR;
+		}
+	}
+
+	/* A value whose hash would move under its own key is not a key. */
+	if (PyDict_GetItemString(namespace, "__hash__") == NULL
+		&& PyDict_SetItemString(namespace, "__hash__", Py_None) < 0) {
+		return RESULT_ERROR;
+	}
+
+	return RESULT_OK;
 }
 
 /* Find the (single) struct base among ``bases``, or NULL if none has fields. */
@@ -133,7 +236,8 @@ static StructType * find_struct_base(PyObject * const bases) {
 static PyObject * build_class_namespace(
 	PyObject * const original_namespace,
 	PyObject * const all_names,
-	PyObject * const new_names
+	PyObject * const new_names,
+	bool const frozen
 ) {
 	PY_OWNED(slots, PyList_AsTuple(new_names));
 	PY_OWNED(match_args, PyList_AsTuple(all_names));
@@ -144,7 +248,8 @@ static PyObject * build_class_namespace(
 		&& namespace != NULL
 		&& drop_class_variables(namespace, new_names) == RESULT_OK
 		&& PyDict_SetItemString(namespace, "__slots__", slots) == 0
-		&& PyDict_SetItemString(namespace, "__match_args__", match_args) == 0) {
+		&& PyDict_SetItemString(namespace, "__match_args__", match_args) == 0
+		&& (frozen || make_mutable(namespace) == RESULT_OK)) {
 		return py_move(&namespace);
 	}
 
