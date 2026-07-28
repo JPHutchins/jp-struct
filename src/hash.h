@@ -2,4 +2,4 @@
 
 #include <Python.h>
 
-Py_hash_t Record_hash(PyObject * self);
+Py_hash_t Struct_hash(PyObject * self);

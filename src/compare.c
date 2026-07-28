@@ -11,20 +11,20 @@ enum comparison {
 	COMPARISON_EQUAL = 1,
 };
 
-static enum comparison records_equal(PyObject * self, PyObject * other);
+static enum comparison structs_equal(PyObject * self, PyObject * other);
 static enum comparison values_equal(
-	RecordType const * self_type,
+	StructType const * self_type,
 	PyObject * self,
-	RecordType const * other_type,
+	StructType const * other_type,
 	PyObject * other
 );
 
-PyObject * Record_rich_compare(PyObject * const self, PyObject * const other, int const op) {
-	if ((op != Py_EQ && op != Py_NE) || !PyObject_TypeCheck(other, &RecordMixin_Type)) {
+PyObject * Struct_rich_compare(PyObject * const self, PyObject * const other, int const op) {
+	if ((op != Py_EQ && op != Py_NE) || !PyObject_TypeCheck(other, &StructMixin_Type)) {
 		Py_RETURN_NOTIMPLEMENTED;
 	}
 
-	switch (records_equal(self, other)) {
+	switch (structs_equal(self, other)) {
 		case COMPARISON_ERROR:
 			return NULL;
 		case COMPARISON_UNEQUAL:
@@ -38,12 +38,12 @@ PyObject * Record_rich_compare(PyObject * const self, PyObject * const other, in
 
 /* Structural: equal iff the field-name tuples match and every value
  * compares equal.  Nominal type identity is deliberately not required. */
-static enum comparison records_equal(PyObject * const self, PyObject * const other) {
-	RecordType const * const self_type = record_type_of(self);
-	RecordType const * const other_type = record_type_of(other);
+static enum comparison structs_equal(PyObject * const self, PyObject * const other) {
+	StructType const * const self_type = struct_type_of(self);
+	StructType const * const other_type = struct_type_of(other);
 
 	int const names_equal = PyObject_RichCompareBool(
-		self_type->record_field_names, other_type->record_field_names, Py_EQ
+		self_type->struct_field_names, other_type->struct_field_names, Py_EQ
 	);
 
 	return names_equal != COMPARISON_EQUAL
@@ -52,15 +52,15 @@ static enum comparison records_equal(PyObject * const self, PyObject * const oth
 }
 
 static enum comparison values_equal(
-	RecordType const * const self_type,
+	StructType const * const self_type,
 	PyObject * const self,
-	RecordType const * const other_type,
+	StructType const * const other_type,
 	PyObject * const other
 ) {
-	for (Py_ssize_t i = 0; i < self_type->record_field_count; ++i) {
+	for (Py_ssize_t i = 0; i < self_type->struct_field_count; ++i) {
 		int const equal = PyObject_RichCompareBool(
-			record_slot_or_none(self_type, self, i),
-			record_slot_or_none(other_type, other, i),
+			struct_slot_or_none(self_type, self, i),
+			struct_slot_or_none(other_type, other, i),
 			Py_EQ
 		);
 

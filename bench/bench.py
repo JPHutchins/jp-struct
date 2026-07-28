@@ -1,4 +1,4 @@
-"""Benchmark `record` against the real alternatives.
+"""Benchmark `jpstruct` against the real alternatives.
 
 Methodology mirrors JP Hutchins' python-struct-profiling / importtime_sweep.py
 so the numbers are directly comparable to the interstellar-inclination article:
@@ -30,7 +30,7 @@ from typing import Callable, NamedTuple
 K = 200
 RUNS = 5
 
-# The in-tree record.*.so lives under src/ (or the repo root); make it
+# The in-tree jpstruct.*.so lives under src/ (or the repo root); make it
 # importable here and in every subprocess we spawn (subprocesses inherit
 # PYTHONPATH, not sys.path).
 _ROOT = Path(__file__).resolve().parent.parent
@@ -50,8 +50,8 @@ class Construct(NamedTuple):
     body: Callable[[int], str]
 
 
-def _record(i: int) -> str:
-    return f"class C{i}(Record):\n    a: int\n    b: int\n    c: int\n"
+def _struct(i: int) -> str:
+    return f"class C{i}(Struct):\n    a: int\n    b: int\n    c: int\n"
 
 
 def _msgspec(i: int) -> str:
@@ -72,8 +72,8 @@ def _record_type(i: int) -> str:
 
 
 CONSTRUCTS = [
-    Construct("gen_record", "record (this project)", "record",
-              "from record import Record", _record),
+    Construct("gen_jpstruct", "jpstruct (this project)", "jpstruct",
+              "from jpstruct import Struct", _struct),
     Construct("gen_msgspec", "msgspec.Struct", "msgspec",
               "import msgspec", _msgspec),
     Construct("gen_namedtuple", "typing.NamedTuple", "typing",
@@ -121,13 +121,13 @@ def build_constructors() -> dict[str, Callable]:
     """Real in-process 3-field constructors (avoids exec/PEP-649 quirks)."""
     out: dict[str, Callable] = {}
 
-    from record import Record
+    from jpstruct import Struct
 
-    class RC(Record):
+    class RC(Struct):
         a: int
         b: int
         c: int
-    out["gen_record"] = RC
+    out["gen_jpstruct"] = RC
 
     import msgspec
 
@@ -186,14 +186,14 @@ def main() -> None:
     for label, dep, us, ns in rows:
         print(f"{label:<{w}} {dep:>10.3f} {us:>9.1f} {ns:>9.1f}")
 
-    record_row = rows[0]
+    jpstruct_row = rows[0]
     nt = next(r for r in rows if r[0].startswith("typing.NamedTuple"))
     ms = next(r for r in rows if r[0].startswith("msgspec"))
-    print("\nTotal startup to define N record types = import_ms + N * us/type/1000")
+    print("\nTotal startup to define N struct types = import_ms + N * us/type/1000")
     for n in (1, 10, 100, 1000):
         def total(r):
             return r[1] + n * r[2] / 1000
-        print(f"  N={n:<5}  record {total(record_row):8.3f} ms   "
+        print(f"  N={n:<5}  jpstruct {total(jpstruct_row):8.3f} ms   "
               f"NamedTuple {total(nt):8.3f} ms   msgspec {total(ms):8.3f} ms")
 
 

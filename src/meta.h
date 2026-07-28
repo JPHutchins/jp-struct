@@ -2,9 +2,9 @@
 
 #include <Python.h>
 
-/* The metaclass: an instance of it *is* a record class.  Not const, for the
- * same reason RecordMixin_Type is not. */
-extern PyTypeObject RecordMeta_Type;
+/* The metaclass: an instance of it *is* a struct class.  Not const, for the
+ * same reason StructMixin_Type is not. */
+extern PyTypeObject StructMeta_Type;
 
-/* Also called directly at module init to build the public ``Record`` base. */
-PyObject * RecordMeta_new(PyTypeObject * metatype, PyObject * args, PyObject * keywords);
+/* Also called directly at module init to build the public ``Struct`` base. */
+PyObject * StructMeta_new(PyTypeObject * metatype, PyObject * args, PyObject * keywords);

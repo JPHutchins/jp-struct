@@ -8,12 +8,12 @@
 #include "types.h"
 
 static enum result append_inherited(
-	RecordType const * base,
+	StructType const * base,
 	PyObject * all_names,
 	PyObject * default_by_name
 );
 static enum result append_declared(
-	RecordType const * base,
+	StructType const * base,
 	PyObject * annotations,
 	PyObject * namespace,
 	PyObject * all_names,
@@ -22,11 +22,11 @@ static enum result append_declared(
 );
 static PyObject * build_defaults(PyObject * all_names, PyObject * default_by_name);
 static PyObject * checked_annotations(PyObject * namespace);
-static bool inherits_field(RecordType const * base, PyObject * field_name);
+static bool inherits_field(StructType const * base, PyObject * field_name);
 
 /* The plan only takes references once every step has succeeded; the working
  * collections belong to this scope either way. */
-struct field_plan field_plan_build(RecordType const * const base, PyObject * const namespace) {
+struct field_plan field_plan_build(StructType const * const base, PyObject * const namespace) {
 	struct field_plan plan = {0};
 
 	PY_OWNED(annotations, checked_annotations(namespace));
@@ -62,7 +62,7 @@ void field_plan_clear(struct field_plan * const plan) {
 }
 
 static PyObject * checked_annotations(PyObject * const namespace) {
-	PY_MOVABLE(annotations, record_annotations(namespace));
+	PY_MOVABLE(annotations, struct_annotations(namespace));
 
 	if (annotations == NULL || PyDict_Check(annotations)) {
 		return py_move(&annotations);
@@ -75,7 +75,7 @@ static PyObject * checked_annotations(PyObject * const namespace) {
 
 /* Inherited fields keep their position and defaults. */
 static enum result append_inherited(
-	RecordType const * const base,
+	StructType const * const base,
 	PyObject * const all_names,
 	PyObject * const default_by_name
 ) {
@@ -83,10 +83,10 @@ static enum result append_inherited(
 		return RESULT_OK;
 	}
 
-	Py_ssize_t const required_count = record_required_count(base);
+	Py_ssize_t const required_count = struct_required_count(base);
 
-	for (Py_ssize_t i = 0; i < base->record_field_count; ++i) {
-		PyObject * const field_name = PyTuple_GET_ITEM(base->record_field_names, i);
+	for (Py_ssize_t i = 0; i < base->struct_field_count; ++i) {
+		PyObject * const field_name = PyTuple_GET_ITEM(base->struct_field_names, i);
 
 		if (PyList_Append(all_names, field_name) < 0) {
 			return RESULT_ERROR;
@@ -97,7 +97,7 @@ static enum result append_inherited(
 		}
 
 		PyObject * const inherited_default =
-			PyTuple_GET_ITEM(base->record_defaults, i - required_count);
+			PyTuple_GET_ITEM(base->struct_defaults, i - required_count);
 
 		if (PyDict_SetItem(default_by_name, field_name, inherited_default) < 0) {
 			return RESULT_ERROR;
@@ -109,7 +109,7 @@ static enum result append_inherited(
 
 /* New fields come from this class's annotations, in declaration order. */
 static enum result append_declared(
-	RecordType const * const base,
+	StructType const * const base,
 	PyObject * const annotations,
 	PyObject * const namespace,
 	PyObject * const all_names,
@@ -149,11 +149,11 @@ static enum result append_declared(
 	return RESULT_OK;
 }
 
-static bool inherits_field(RecordType const * const base, PyObject * const field_name) {
-	Py_ssize_t const inherited_count = base != NULL ? base->record_field_count : 0;
+static bool inherits_field(StructType const * const base, PyObject * const field_name) {
+	Py_ssize_t const inherited_count = base != NULL ? base->struct_field_count : 0;
 
 	for (Py_ssize_t i = 0; i < inherited_count; ++i) {
-		if (PyUnicode_Compare(field_name, PyTuple_GET_ITEM(base->record_field_names, i)) == 0) {
+		if (PyUnicode_Compare(field_name, PyTuple_GET_ITEM(base->struct_field_names, i)) == 0) {
 			return true;
 		}
 	}

@@ -1,10 +1,10 @@
-"""Build the `record` C extension.
+"""Build the `jpstruct` C extension.
 
 Run via camas (`uv run camas build`), or directly:
 
     python setup.py build_ext --inplace
 
-This produces `record.*.so` in the repo root, importable as `record`. Sources
+This produces `jpstruct.*.so` in the repo root, importable as `jpstruct`. Sources
 and compile flags come from pyproject.toml's [tool.jp-struct], which the nix
 cross builds read too.
 """
@@ -23,6 +23,6 @@ config = tomllib.loads(Path(__file__).with_name("pyproject.toml").read_text())["
 
 setup(
     ext_modules=[
-        Extension("record", config["sources"], extra_compile_args=config["c-flags"]),
+        Extension("jpstruct", config["sources"], extra_compile_args=config["c-flags"]),
     ],
 )

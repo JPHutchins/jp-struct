@@ -18,31 +18,31 @@ struct member_lookup {
 	Py_ssize_t offset;
 };
 
-static int RecordMeta_traverse(PyObject * self, visitproc visit, void * arg);
-static int RecordMeta_clear(PyObject * self);
-static void RecordMeta_dealloc(PyObject * self);
+static int StructMeta_traverse(PyObject * self, visitproc visit, void * arg);
+static int StructMeta_clear(PyObject * self);
+static void StructMeta_dealloc(PyObject * self);
 
-static RecordType * find_record_base(PyObject * bases);
+static StructType * find_struct_base(PyObject * bases);
 static PyObject * build_class_namespace(
 	PyObject * original_namespace,
 	PyObject * all_names,
 	PyObject * new_names
 );
 static enum result drop_class_variables(PyObject * namespace, PyObject * new_names);
-static RecordType * create_class(
+static StructType * create_class(
 	PyTypeObject * metatype,
 	PyObject * name,
 	PyObject * bases,
 	PyObject * namespace
 );
 static enum result install_fields(
-	RecordType * record_class,
-	RecordType const * base,
+	StructType * struct_class,
+	StructType const * base,
 	struct field_plan const * plan
 );
 static Py_ssize_t * resolve_slot_offsets(
-	RecordType * record_class,
-	RecordType const * base,
+	StructType * struct_class,
+	StructType const * base,
 	PyObject * new_names,
 	Py_ssize_t field_count
 );
@@ -52,25 +52,25 @@ static struct member_lookup find_member(
 	PyObject * name
 );
 
-PyTypeObject RecordMeta_Type = {
-	PyVarObject_HEAD_INIT(NULL, 0) .tp_name = "record.RecordMeta",
-	.tp_basicsize = sizeof(RecordType),
+PyTypeObject StructMeta_Type = {
+	PyVarObject_HEAD_INIT(NULL, 0) .tp_name = "struct.StructMeta",
+	.tp_basicsize = sizeof(StructType),
 	.tp_itemsize = sizeof(PyMemberDef),
 	.tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_TYPE_SUBCLASS | Py_TPFLAGS_HAVE_GC | Py_TPFLAGS_HAVE_VECTORCALL | Py_TPFLAGS_BASETYPE,
-	.tp_new = RecordMeta_new,
-	.tp_dealloc = RecordMeta_dealloc,
-	.tp_traverse = RecordMeta_traverse,
-	.tp_clear = RecordMeta_clear,
+	.tp_new = StructMeta_new,
+	.tp_dealloc = StructMeta_dealloc,
+	.tp_traverse = StructMeta_traverse,
+	.tp_clear = StructMeta_clear,
 	.tp_call = PyVectorcall_Call,
 	.tp_vectorcall_offset = offsetof(PyTypeObject, tp_vectorcall),
 };
 
 /*
- * Creating a record class is four steps: work out the fields, build the
+ * Creating a struct class is four steps: work out the fields, build the
  * namespace type.__new__ wants, make the type, then hand it the field table
- * that makes it a record.
+ * that makes it a struct.
  */
-PyObject * RecordMeta_new(
+PyObject * StructMeta_new(
 	PyTypeObject * const metatype,
 	PyObject * const args,
 	PyObject * const keywords  /* class keywords (frozen=, kw_only=, ...) not yet supported */
@@ -82,7 +82,7 @@ PyObject * RecordMeta_new(
 	if (
 		!PyArg_ParseTuple(
 			args,
-			"UO!O!:RecordMeta.__new__",
+			"UO!O!:StructMeta.__new__",
 			&name,
 			&PyTuple_Type,
 			&bases,
@@ -93,7 +93,7 @@ PyObject * RecordMeta_new(
 		return NULL;
 	}
 
-	RecordType const * const base = find_record_base(bases);
+	StructType const * const base = find_struct_base(bases);
 	struct field_plan plan = field_plan_build(base, original_namespace);
 
 	if (field_plan_failed(&plan)) {
@@ -101,26 +101,26 @@ PyObject * RecordMeta_new(
 	}
 
 	PY_OWNED(namespace, build_class_namespace(original_namespace, plan.all_names, plan.new_names));
-	RecordType * record_class =
+	StructType * struct_class =
 		namespace != NULL ? create_class(metatype, name, bases, namespace) : NULL;
 
-	if (record_class != NULL && install_fields(record_class, base, &plan) != RESULT_OK) {
-		Py_CLEAR(record_class);
+	if (struct_class != NULL && install_fields(struct_class, base, &plan) != RESULT_OK) {
+		Py_CLEAR(struct_class);
 	}
 
 	field_plan_clear(&plan);
 
-	return (PyObject *) record_class;
+	return (PyObject *) struct_class;
 }
 
-/* Find the (single) record base among ``bases``, or NULL if none has fields. */
-static RecordType * find_record_base(PyObject * const bases) {
+/* Find the (single) struct base among ``bases``, or NULL if none has fields. */
+static StructType * find_struct_base(PyObject * const bases) {
 	for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(bases); ++i) {
 		PyObject * const base = PyTuple_GET_ITEM(bases, i);
 
-		if (PyObject_TypeCheck(base, &RecordMeta_Type)
-			&& ((RecordType *) base)->record_field_count > 0) {
-			return (RecordType *) base;
+		if (PyObject_TypeCheck(base, &StructMeta_Type)
+			&& ((StructType *) base)->struct_field_count > 0) {
+			return (StructType *) base;
 		}
 	}
 
@@ -166,7 +166,7 @@ static enum result drop_class_variables(PyObject * const namespace, PyObject * c
 	return RESULT_OK;
 }
 
-static RecordType * create_class(
+static StructType * create_class(
 	PyTypeObject * const metatype,
 	PyObject * const name,
 	PyObject * const bases,
@@ -178,13 +178,13 @@ static RecordType * create_class(
 		return NULL;
 	}
 
-	return (RecordType *) PyType_Type.tp_new(metatype, type_args, NULL);
+	return (StructType *) PyType_Type.tp_new(metatype, type_args, NULL);
 }
 
-/* The type exists but is not yet a record; this is what makes it one. */
+/* The type exists but is not yet a struct; this is what makes it one. */
 static enum result install_fields(
-	RecordType * const record_class,
-	RecordType const * const base,
+	StructType * const struct_class,
+	StructType const * const base,
 	struct field_plan const * const plan
 ) {
 	PY_MOVABLE(field_names, PyList_AsTuple(plan->all_names));
@@ -195,18 +195,18 @@ static enum result install_fields(
 
 	Py_ssize_t const field_count = PyTuple_GET_SIZE(field_names);
 	Py_ssize_t * const offsets =
-		resolve_slot_offsets(record_class, base, plan->new_names, field_count);
+		resolve_slot_offsets(struct_class, base, plan->new_names, field_count);
 
 	if (offsets == NULL) {
 		return RESULT_ERROR;
 	}
 
-	record_class->record_field_names = py_move(&field_names);
-	record_class->record_defaults = Py_NewRef(plan->defaults);
-	record_class->record_slot_offsets = offsets;
-	record_class->record_field_count = field_count;
-	record_class->record_default_count = PyTuple_GET_SIZE(plan->defaults);
-	record_class->heap_type.ht_type.tp_vectorcall = Record_vectorcall;
+	struct_class->struct_field_names = py_move(&field_names);
+	struct_class->struct_defaults = Py_NewRef(plan->defaults);
+	struct_class->struct_slot_offsets = offsets;
+	struct_class->struct_field_count = field_count;
+	struct_class->struct_default_count = PyTuple_GET_SIZE(plan->defaults);
+	struct_class->heap_type.ht_type.tp_vectorcall = Struct_vectorcall;
 
 	return RESULT_OK;
 }
@@ -214,8 +214,8 @@ static enum result install_fields(
 /* Inherited fields keep the base's offsets; new ones are wherever type.__new__
  * just placed the slots it created from __slots__. */
 static Py_ssize_t * resolve_slot_offsets(
-	RecordType * const record_class,
-	RecordType const * const base,
+	StructType * const struct_class,
+	StructType const * const base,
 	PyObject * const new_names,
 	Py_ssize_t const field_count
 ) {
@@ -227,14 +227,14 @@ static Py_ssize_t * resolve_slot_offsets(
 		return NULL;
 	}
 
-	Py_ssize_t const inherited_count = base != NULL ? base->record_field_count : 0;
+	Py_ssize_t const inherited_count = base != NULL ? base->struct_field_count : 0;
 
 	for (Py_ssize_t i = 0; i < inherited_count; ++i) {
-		offsets[i] = base->record_slot_offsets[i];
+		offsets[i] = base->struct_slot_offsets[i];
 	}
 
-	PyMemberDef const * const members = record_heap_type_members(record_class);
-	Py_ssize_t const member_count = Py_SIZE(record_class);
+	PyMemberDef const * const members = struct_heap_type_members(struct_class);
+	Py_ssize_t const member_count = Py_SIZE(struct_class);
 
 	for (Py_ssize_t i = 0; i < PyList_GET_SIZE(new_names); ++i) {
 		PyObject * const field_name = PyList_GET_ITEM(new_names, i);
@@ -272,36 +272,36 @@ static struct member_lookup find_member(
 
 /* `visit` and `arg` are not free names: Py_VISIT expands to reference both by
  * those exact spellings, so renaming either one stops the macro compiling. */
-static int RecordMeta_traverse(PyObject * const self, visitproc const visit, void * const arg) {
-	RecordType * const record_class = (RecordType *) self;
+static int StructMeta_traverse(PyObject * const self, visitproc const visit, void * const arg) {
+	StructType * const struct_class = (StructType *) self;
 
-	Py_VISIT(record_class->record_field_names);
-	Py_VISIT(record_class->record_defaults);
+	Py_VISIT(struct_class->struct_field_names);
+	Py_VISIT(struct_class->struct_defaults);
 
 	return PyType_Type.tp_traverse(self, visit, arg);
 }
 
-static int RecordMeta_clear(PyObject * const self) {
-	RecordType * const record_class = (RecordType *) self;
+static int StructMeta_clear(PyObject * const self) {
+	StructType * const struct_class = (StructType *) self;
 
-	if (record_class->record_field_names == NULL) {  /* already cleared */
+	if (struct_class->struct_field_names == NULL) {  /* already cleared */
 		return RESULT_OK;
 	}
 
-	Py_CLEAR(record_class->record_field_names);
-	Py_CLEAR(record_class->record_defaults);
-	PyMem_Free(record_class->record_slot_offsets);
-	record_class->record_slot_offsets = NULL;
+	Py_CLEAR(struct_class->struct_field_names);
+	Py_CLEAR(struct_class->struct_defaults);
+	PyMem_Free(struct_class->struct_slot_offsets);
+	struct_class->struct_slot_offsets = NULL;
 
 	return PyType_Type.tp_clear(self);
 }
 
-static void RecordMeta_dealloc(PyObject * const self) {
+static void StructMeta_dealloc(PyObject * const self) {
 	/* GC invariants require dealloc to untrack immediately, but
 	 * PyType_Type.tp_dealloc assumes the type is currently tracked — hence the
 	 * untrack / clear / re-track dance (mirrors msgspec's StructMeta_dealloc). */
 	PyObject_GC_UnTrack(self);
-	RecordMeta_clear(self);
+	StructMeta_clear(self);
 	PyObject_GC_Track(self);
 	PyType_Type.tp_dealloc(self);
 }

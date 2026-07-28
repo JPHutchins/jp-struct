@@ -1,4 +1,4 @@
-"""Tests for the `record` extension.
+"""Tests for the `jpstruct` extension.
 
 Seeded from the prototype's smoke test. Covers the features the annotation
 form supports: construction by position/keyword, defaults, immutability,
@@ -10,18 +10,18 @@ Run with `uv run camas test` (or `python -m pytest`).
 
 import pytest
 
-import record
-from record import Record
+import jpstruct
+from jpstruct import Struct
 
 
-class Point2D(Record):
+class Point2D(Struct):
     """A simple 2D point."""
 
     x: float
     y: float
 
 
-class WithDefaults(Record):
+class WithDefaults(Struct):
     a: int
     b: int = 2
     c: int = 3
@@ -54,9 +54,9 @@ def test_annotations():
     assert Point2D.__annotations__ == {"x": float, "y": float}
 
 
-def test_record_fields_introspection():
-    assert Point2D(1.0, 2.0).__record_fields__ == ("x", "y")
-    assert WithDefaults(1).__record_defaults__ == (2, 3)
+def test_struct_fields_introspection():
+    assert Point2D(1.0, 2.0).__struct_fields__ == ("x", "y")
+    assert WithDefaults(1).__struct_defaults__ == (2, 3)
 
 
 def test_defaults():
@@ -77,14 +77,14 @@ def test_eq_structural():
     assert Point2D(1.0, 2.0) == Point2D(1.0, 2.0)
     assert Point2D(1.0, 2.0) != Point2D(1.0, 9.0)
 
-    class Other2D(Record):
+    class Other2D(Struct):
         x: float
         y: float
 
     # Structural equality: equal field names + values, regardless of class.
     assert Point2D(1.0, 2.0) == Other2D(1.0, 2.0)
 
-    class Point1D(Record):
+    class Point1D(Struct):
         x: float
 
     assert Point1D(1.0) != Point2D(1.0, 2.0)
@@ -119,11 +119,11 @@ def test_inheritance_extends_fields():
     p = Point3D(1.0, 2.0, 3.0)
     assert (p.x, p.y, p.z) == (1.0, 2.0, 3.0)
     assert Point3D.__match_args__ == ("x", "y", "z")
-    assert p.__record_fields__ == ("x", "y", "z")
+    assert p.__struct_fields__ == ("x", "y", "z")
 
 
-def test_empty_record():
-    class Empty(Record):
+def test_empty_struct():
+    class Empty(Struct):
         pass
 
     assert Empty() == Empty()
@@ -131,5 +131,5 @@ def test_empty_record():
 
 
 def test_metaclass_identity():
-    assert type(Point2D) is record.RecordMeta
-    assert isinstance(Point2D(1.0, 2.0), Record)
+    assert type(Point2D) is jpstruct.StructMeta
+    assert isinstance(Point2D(1.0, 2.0), Struct)

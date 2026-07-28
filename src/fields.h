@@ -18,7 +18,7 @@ struct field_plan {
 
 /* Owns its three references.  On failure every member is NULL and an
  * exception is set. */
-struct field_plan field_plan_build(RecordType const * base, PyObject * namespace);
+struct field_plan field_plan_build(StructType const * base, PyObject * namespace);
 
 void field_plan_clear(struct field_plan * plan);
 

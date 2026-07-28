@@ -1,4 +1,4 @@
-/* record — a minimal, C-backed, inheritable ``Record`` base class.
+/* struct — a minimal, C-backed, inheritable ``Struct`` base class.
  *
  * This is the seed implementation copied from the feasibility prototype
  * (JPHutchins/record-type PR #1). It answers: can record-type's features be
@@ -9,10 +9,10 @@
  * The design is a deliberately stripped-down clone of msgspec's ``Struct``
  * machinery (see msgspec's src/msgspec/_core.c):
  *
- *   - ``RecordMeta``  : a C metaclass whose ``tp_new`` builds the record type
+ *   - ``StructMeta``  : a C metaclass whose ``tp_new`` builds the struct type
  *                       at class-creation time, entirely in C (no ``exec``, no
  *                       ``inspect``).  This is what makes type creation fast.
- *   - ``Record``      : the public base class.  Subclasses declare fields with
+ *   - ``Struct``      : the public base class.  Subclasses declare fields with
  *                       class-body annotations (``a: int``), exactly like
  *                       NamedTuple/dataclass/msgspec.
  *   - per-type vectorcall for instance creation (fields written straight to
@@ -32,62 +32,62 @@
 #include "mixin.h"
 #include "result.h"
 
-static int record_exec(PyObject * module);
-static enum result add_record_base(PyObject * module);
-static PyObject * create_record_base(void);
+static int struct_exec(PyObject * module);
+static enum result add_struct_base(PyObject * module);
+static PyObject * create_struct_base(void);
 
-static PyModuleDef_Slot record_slots[] = {
-	{Py_mod_exec, record_exec},
+static PyModuleDef_Slot struct_slots[] = {
+	{Py_mod_exec, struct_exec},
 #ifdef Py_mod_multiple_interpreters
 	{Py_mod_multiple_interpreters, Py_MOD_MULTIPLE_INTERPRETERS_NOT_SUPPORTED},
 #endif
 	{0, NULL},
 };
 
-static PyModuleDef record_module = {
+static PyModuleDef struct_module = {
 	PyModuleDef_HEAD_INIT,
-	.m_name = "record",
-	.m_doc = "A minimal C-backed inheritable Record base class.",
+	.m_name = "jpstruct",
+	.m_doc = "A minimal C-backed inheritable Struct base class.",
 	.m_size = 0,
-	.m_slots = record_slots,
+	.m_slots = struct_slots,
 };
 
-PyMODINIT_FUNC PyInit_record(void) {
-	return PyModuleDef_Init(&record_module);
+PyMODINIT_FUNC PyInit_jpstruct(void) {
+	return PyModuleDef_Init(&struct_module);
 }
 
-static int record_exec(PyObject * const module) {
-	RecordMeta_Type.tp_base = &PyType_Type;
+static int struct_exec(PyObject * const module) {
+	StructMeta_Type.tp_base = &PyType_Type;
 
-	if (PyType_Ready(&RecordMeta_Type) < 0 || PyType_Ready(&RecordMixin_Type) < 0) {
+	if (PyType_Ready(&StructMeta_Type) < 0 || PyType_Ready(&StructMixin_Type) < 0) {
 		return RESULT_ERROR;
 	}
 
-	if (add_record_base(module) != RESULT_OK) {
+	if (add_struct_base(module) != RESULT_OK) {
 		return RESULT_ERROR;
 	}
 
-	return PyModule_AddObjectRef(module, "RecordMeta", (PyObject *) &RecordMeta_Type);
+	return PyModule_AddObjectRef(module, "StructMeta", (PyObject *) &StructMeta_Type);
 }
 
-static enum result add_record_base(PyObject * const module) {
-	PyObject * const record_base = create_record_base();
+static enum result add_struct_base(PyObject * const module) {
+	PyObject * const struct_base = create_struct_base();
 
-	if (record_base == NULL) {
+	if (struct_base == NULL) {
 		return RESULT_ERROR;
 	}
 
-	int const added = PyModule_AddObjectRef(module, "Record", record_base);
-	Py_DECREF(record_base);
+	int const added = PyModule_AddObjectRef(module, "Struct", struct_base);
+	Py_DECREF(struct_base);
 
 	return added < 0 ? RESULT_ERROR : RESULT_OK;
 }
 
-/* Build the public ``Record`` base via the metaclass, so its metaclass is
- * RecordMeta and it inherits the dunders from the mixin. */
-static PyObject * create_record_base(void) {
-	PyObject * const name = PyUnicode_FromString("Record");
-	PyObject * const bases = PyTuple_Pack(1, (PyObject *) &RecordMixin_Type);
+/* Build the public ``Struct`` base via the metaclass, so its metaclass is
+ * StructMeta and it inherits the dunders from the mixin. */
+static PyObject * create_struct_base(void) {
+	PyObject * const name = PyUnicode_FromString("Struct");
+	PyObject * const bases = PyTuple_Pack(1, (PyObject *) &StructMixin_Type);
 	PyObject * const namespace = PyDict_New();
 	PyObject * const args = name != NULL && bases != NULL && namespace != NULL
 		? PyTuple_Pack(3, name, bases, namespace)
@@ -101,8 +101,8 @@ static PyObject * create_record_base(void) {
 		return NULL;
 	}
 
-	PyObject * const record_base = RecordMeta_new(&RecordMeta_Type, args, NULL);
+	PyObject * const struct_base = StructMeta_new(&StructMeta_Type, args, NULL);
 	Py_DECREF(args);
 
-	return record_base;
+	return struct_base;
 }

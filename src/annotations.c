@@ -14,7 +14,7 @@ enum annotation_format {
 static PyObject * borrow_annotate(PyObject * namespace);
 static PyObject * evaluate(PyObject * annotate, enum annotation_format format);
 
-PyObject * record_annotations(PyObject * const namespace) {
+PyObject * struct_annotations(PyObject * const namespace) {
 	PyObject * const declared = PyDict_GetItemString(namespace, "__annotations__");
 
 	if (declared != NULL) {

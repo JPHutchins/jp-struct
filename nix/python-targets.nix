@@ -11,7 +11,7 @@
       pbsTriple = "x86_64-unknown-linux-gnu";
       zigTarget = "x86_64-linux-gnu.2.17";
       platformTag = "manylinux_2_17_x86_64";
-      moduleName = "record.cpython-{nodot}-x86_64-linux-gnu.so";
+      moduleName = "jpstruct.cpython-{nodot}-x86_64-linux-gnu.so";
       extraFlags = [ ];
       linkPythonLibrary = false;
     };
@@ -19,7 +19,7 @@
       pbsTriple = "aarch64-unknown-linux-gnu";
       zigTarget = "aarch64-linux-gnu.2.17";
       platformTag = "manylinux_2_17_aarch64";
-      moduleName = "record.cpython-{nodot}-aarch64-linux-gnu.so";
+      moduleName = "jpstruct.cpython-{nodot}-aarch64-linux-gnu.so";
       extraFlags = [ ];
       linkPythonLibrary = false;
     };
@@ -27,7 +27,7 @@
       pbsTriple = "x86_64-apple-darwin";
       zigTarget = "x86_64-macos.10.13";
       platformTag = "macosx_10_13_x86_64";
-      moduleName = "record.cpython-{nodot}-darwin.so";
+      moduleName = "jpstruct.cpython-{nodot}-darwin.so";
       extraFlags = [
         "-undefined"
         "dynamic_lookup"
@@ -38,7 +38,7 @@
       pbsTriple = "aarch64-apple-darwin";
       zigTarget = "aarch64-macos.11.0";
       platformTag = "macosx_11_0_arm64";
-      moduleName = "record.cpython-{nodot}-darwin.so";
+      moduleName = "jpstruct.cpython-{nodot}-darwin.so";
       extraFlags = [
         "-undefined"
         "dynamic_lookup"
@@ -49,7 +49,7 @@
       pbsTriple = "x86_64-pc-windows-msvc";
       zigTarget = "x86_64-windows-gnu";
       platformTag = "win_amd64";
-      moduleName = "record.pyd";
+      moduleName = "jpstruct.pyd";
       extraFlags = [ ];
       linkPythonLibrary = true;
     };
@@ -57,7 +57,7 @@
       pbsTriple = "aarch64-pc-windows-msvc";
       zigTarget = "aarch64-windows-gnu";
       platformTag = "win_arm64";
-      moduleName = "record.pyd";
+      moduleName = "jpstruct.pyd";
       extraFlags = [ ];
       linkPythonLibrary = true;
     };

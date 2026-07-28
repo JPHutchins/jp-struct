@@ -2,4 +2,4 @@
 
 #include <Python.h>
 
-PyObject * Record_rich_compare(PyObject * self, PyObject * other, int op);
+PyObject * Struct_rich_compare(PyObject * self, PyObject * other, int op);

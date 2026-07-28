@@ -12,44 +12,44 @@ struct field_lookup {
 };
 
 static void bind_positional(
-	RecordType const * type,
+	StructType const * type,
 	PyObject * self,
 	PyObject * const * arguments,
 	Py_ssize_t positional_count
 );
 static enum result bind_keywords(
-	RecordType const * type,
+	StructType const * type,
 	PyObject * self,
 	PyObject * const * arguments,
 	Py_ssize_t positional_count,
 	PyObject * keyword_names
 );
 static enum result fill_defaults(
-	RecordType const * type,
+	StructType const * type,
 	PyObject * self,
 	Py_ssize_t positional_count
 );
-static struct field_lookup find_field(RecordType const * type, PyObject * name);
+static struct field_lookup find_field(StructType const * type, PyObject * name);
 
 /*
  * Instances are built straight into slot memory: allocate, then let each of
- * the three argument sources write the slots it owns. A half-written record is
+ * the three argument sources write the slots it owns. A half-written struct is
  * a valid object with NULL slots, so unwinding is just Py_DECREF.
  */
-PyObject * Record_vectorcall(
-	PyObject * const record_class,
+PyObject * Struct_vectorcall(
+	PyObject * const struct_class,
 	PyObject * const * const arguments,
 	size_t const argument_count_and_flags,
 	PyObject * const keyword_names
 ) {
-	RecordType * const type = (RecordType *) record_class;
+	StructType * const type = (StructType *) struct_class;
 	Py_ssize_t const positional_count = PyVectorcall_NARGS(argument_count_and_flags);
 
-	if (positional_count > type->record_field_count) {
+	if (positional_count > type->struct_field_count) {
 		PyErr_Format(
 			PyExc_TypeError,
 			"%.200s() takes at most %zd positional arguments but %zd were given",
-			record_type_name(type), type->record_field_count, positional_count
+			struct_type_name(type), type->struct_field_count, positional_count
 		);
 
 		return NULL;
@@ -75,18 +75,18 @@ PyObject * Record_vectorcall(
 
 /* Positional arguments are in field order by definition, so this is a copy. */
 static void bind_positional(
-	RecordType const * const type,
+	StructType const * const type,
 	PyObject * const self,
 	PyObject * const * const arguments,
 	Py_ssize_t const positional_count
 ) {
 	for (Py_ssize_t i = 0; i < positional_count; ++i) {
-		*record_slot(type, self, i) = Py_NewRef(arguments[i]);
+		*struct_slot(type, self, i) = Py_NewRef(arguments[i]);
 	}
 }
 
 static enum result bind_keywords(
-	RecordType const * const type,
+	StructType const * const type,
 	PyObject * const self,
 	PyObject * const * const arguments,
 	Py_ssize_t const positional_count,
@@ -104,7 +104,7 @@ static enum result bind_keywords(
 			case FIELD_LOOKUP_MISSING:
 				PyErr_Format(
 					PyExc_TypeError, "%.200s() got an unexpected keyword argument '%U'",
-					record_type_name(type), keyword
+					struct_type_name(type), keyword
 				);
 
 				return RESULT_ERROR;
@@ -112,12 +112,12 @@ static enum result bind_keywords(
 				break;
 		}
 
-		PyObject * * const slot = record_slot(type, self, found.index);
+		PyObject * * const slot = struct_slot(type, self, found.index);
 
 		if (*slot != NULL || found.index < positional_count) {
 			PyErr_Format(
 				PyExc_TypeError, "%.200s() got multiple values for argument '%U'",
-				record_type_name(type), keyword
+				struct_type_name(type), keyword
 			);
 
 			return RESULT_ERROR;
@@ -132,14 +132,14 @@ static enum result bind_keywords(
 /* Whatever position and keyword left unwritten: a default if the field has
  * one, otherwise the call is short an argument. */
 static enum result fill_defaults(
-	RecordType const * const type,
+	StructType const * const type,
 	PyObject * const self,
 	Py_ssize_t const positional_count
 ) {
-	Py_ssize_t const required_count = record_required_count(type);
+	Py_ssize_t const required_count = struct_required_count(type);
 
-	for (Py_ssize_t i = positional_count; i < type->record_field_count; ++i) {
-		PyObject * * const slot = record_slot(type, self, i);
+	for (Py_ssize_t i = positional_count; i < type->struct_field_count; ++i) {
+		PyObject * * const slot = struct_slot(type, self, i);
 
 		if (*slot != NULL) {
 			continue;
@@ -148,13 +148,13 @@ static enum result fill_defaults(
 		if (i < required_count) {
 			PyErr_Format(
 				PyExc_TypeError, "%.200s() missing required argument '%U'",
-				record_type_name(type), PyTuple_GET_ITEM(type->record_field_names, i)
+				struct_type_name(type), PyTuple_GET_ITEM(type->struct_field_names, i)
 			);
 
 			return RESULT_ERROR;
 		}
 
-		*slot = Py_NewRef(PyTuple_GET_ITEM(type->record_defaults, i - required_count));
+		*slot = Py_NewRef(PyTuple_GET_ITEM(type->struct_defaults, i - required_count));
 	}
 
 	return RESULT_OK;
@@ -165,15 +165,15 @@ static enum result fill_defaults(
  * identity scan resolves them without touching PyUnicode_Compare; the equality
  * scan is the fallback for names assembled at runtime.
  */
-static struct field_lookup find_field(RecordType const * const type, PyObject * const name) {
-	for (Py_ssize_t i = 0; i < type->record_field_count; ++i) {
-		if (name == PyTuple_GET_ITEM(type->record_field_names, i)) {
+static struct field_lookup find_field(StructType const * const type, PyObject * const name) {
+	for (Py_ssize_t i = 0; i < type->struct_field_count; ++i) {
+		if (name == PyTuple_GET_ITEM(type->struct_field_names, i)) {
 			return (struct field_lookup) { .tag = FIELD_LOOKUP_FOUND, .index = i };
 		}
 	}
 
-	for (Py_ssize_t i = 0; i < type->record_field_count; ++i) {
-		int const compared = PyUnicode_Compare(name, PyTuple_GET_ITEM(type->record_field_names, i));
+	for (Py_ssize_t i = 0; i < type->struct_field_count; ++i) {
+		int const compared = PyUnicode_Compare(name, PyTuple_GET_ITEM(type->struct_field_names, i));
 
 		if (compared == 0) {
 			return (struct field_lookup) { .tag = FIELD_LOOKUP_FOUND, .index = i };

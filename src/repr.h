@@ -2,4 +2,4 @@
 
 #include <Python.h>
 
-PyObject * Record_repr(PyObject * self);
+PyObject * Struct_repr(PyObject * self);

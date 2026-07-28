@@ -1,5 +1,5 @@
 {
-  description = "jp-struct — a C-backed, inheritable Record base class for Python";
+  description = "jp-struct — a C-backed, inheritable Struct base class for Python";
 
   inputs.nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
 
@@ -170,7 +170,7 @@
                 pip install --no-index --no-deps --target=site \
                   ${forSystem.${system}.wheels."3.14-manylinux-x86_64"}/*.whl
                 export PYTHONPATH=$PWD/site
-                python -c 'import record; print("imported", record.__file__)'
+                python -c 'import jpstruct; print("imported", jpstruct.__file__)'
                 python -m pytest -q -p no:cacheprovider ${./tests}
                 touch $out
               '';

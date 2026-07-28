@@ -12,7 +12,6 @@ NIX_SOURCES = by_suffix(
 PYTHONS = tuple(Path(".python-version").read_text().split())
 OLDEST = min(PYTHONS, key=lambda python: tuple(map(int, python.split("."))))
 NEWEST = max(PYTHONS, key=lambda python: tuple(map(int, python.split("."))))
-WHEELS = "result-wheels"
 
 # --no-project: camas's dev group floors above the oldest interpreter here.
 UV = "uv run --no-project --managed-python --python {PY} --with setuptools --with tomli --with pytest"
@@ -43,7 +42,7 @@ check = Parallel(test, format_check)
 # Installed, not compiled: MSVC has no __attribute__((cleanup)), so the Windows
 # leg cannot build this source at all.
 wheel_test = Task(
-    "uv run --no-project --managed-python --python {PY} --find-links " + WHEELS + " --with jp-struct"
+    "uv run --no-project --managed-python --python {PY} --find-links result-wheels --with jp-struct"
     " --with pytest python -m pytest"
 )
 

@@ -5,14 +5,14 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "jp-struct"
 version = "0.0.0"
-description = "A C-backed, inheritable Record/Struct base class for Python — fast import, fast type creation"
+description = "A C-backed, inheritable Struct base class for Python — fast import, fast type creation"
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [{ name = "JP Hutchins", email = "jp@intercreate.io" }]
 license = "MIT"
 license-files = ["LICENSE"]
 
-# The importable module is `record` (from record import Record); the C source
+# The importable module is `jpstruct` (from jpstruct import Struct); the C source
 # is wired up in setup.py because setuptools does not yet support declaring
 # ext_modules in pyproject.toml.
 
@@ -43,7 +43,7 @@ c-flags = [
     "-Wno-unused-parameter",
 ]
 sources = [
-    "src/record.c",
+    "src/jpstruct.c",
     "src/annotations.c",
     "src/compare.c",
     "src/construct.c",

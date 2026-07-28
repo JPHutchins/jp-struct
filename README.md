@@ -1,13 +1,13 @@
 # jp-struct
 
-A C-backed, **inheritable** `Record` base class for Python — `class Foo(Record): ...`,
+A C-backed, **inheritable** `Struct` base class for Python — `class Foo(Struct): ...`,
 like `typing.NamedTuple`, but with near-zero import cost and faster type creation
 than anything else measured. Optimized for **program startup** (CLIs, build tooling).
 
 ```python
-from record import Record
+from jpstruct import Struct
 
-class Point(Record):
+class Point(Struct):
     x: float
     y: float
 
@@ -39,8 +39,8 @@ so one definition drives both local development and CI. Interpreters come from
 uv, driven by `.python-version`, which is also the matrix the wheels are built
 for.
 
-`build_ext --inplace` lands the compiled `record.*.so` under `src/`, and the
-root `conftest.py` puts it on the path when nothing else provides `record`.
+`build_ext --inplace` lands the compiled `jpstruct.*.so` under `src/`, and the
+root `conftest.py` puts it on the path when nothing else provides `jpstruct`.
 Never install the project to get it — installing means compiling, and on
 Windows that is MSVC, which cannot build this source.
 
@@ -70,7 +70,7 @@ it when `setup.py` or the interpreter changes.
 ## What it is / isn't
 
 Fields come from class-body annotations (like dataclass/msgspec/NamedTuple).
-Records are immutable, hashable, slotted, and define `__eq__` (structural),
+Structs are immutable, hashable, slotted, and define `__eq__` (structural),
 `__hash__`, `__repr__`, `__match_args__`, and single-base field inheritance.
 
 It deliberately does **not** include serialization/validation (that's msgspec),
