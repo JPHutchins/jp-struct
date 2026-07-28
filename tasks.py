@@ -5,6 +5,12 @@ from pathlib import Path
 from camas import Claude, Config, Parallel, Project, Sequential, Task, by_suffix
 
 C_SOURCES = by_suffix((".c", ".h"), default=tuple(sorted(str(p) for p in Path("src").glob("*.[ch]"))))
+
+# Analysis takes translation units; a header is reached through the unit that
+# includes it, and compiling one alone is an error under -Werror.
+C_TRANSLATION_UNITS = by_suffix(
+    (".c",), default=tuple(sorted(str(p) for p in Path("src").glob("*.c")))
+)
 NIX_SOURCES = by_suffix(
     (".nix",),
     default=tuple(sorted(str(p) for p in (*Path(".").glob("*.nix"), *Path("nix").glob("*.nix")))),
@@ -20,8 +26,11 @@ NIX_INPUTS = ("src/", "nix/", "tools/", "tests/", "flake.nix", "flake.lock", "py
 
 build = Task(UV + " python setup.py build_ext --inplace", mutates=True)
 pytest = Task(UV + " python -m pytest")
-compile_commands = Task("uv run python tools/compile_commands.py", mutates=True)
-clean = Task("uv run python tools/clean.py", mutates=True)
+# --no-sync: analyze reaches this from ci, and CI never installs the project.
+compile_flags = Task("uv run --no-sync python tools/compile_flags.py", mutates=True)
+
+# Everything untracked, less the environment, camas's timings and local settings.
+clean = Task("git clean -xdf -e .venv -e .camas -e .claude", mutates=True)
 update_python_targets = Task("uv run python tools/update_python_targets.py", mutates=True)
 
 c_format = Task("jphfmt -i {paths}", paths=C_SOURCES, mutates=True)
@@ -31,6 +40,14 @@ nix_format_check = Task("nixfmt --check {paths}", paths=NIX_SOURCES)
 format = Parallel(c_format, nix_format)
 format_check = Parallel(c_format_check, nix_format_check)
 
+# Two engines rather than one: they are independent implementations, and the
+# flags carry -Werror, so gcc also holds the build to a second compiler.
+c_tidy = Task("clang-tidy --quiet {paths}", paths=C_TRANSLATION_UNITS)
+c_analyzer = Task(
+    "gcc -fanalyzer -fsyntax-only @compile_flags.txt {paths}", paths=C_TRANSLATION_UNITS
+)
+analyze = Sequential(compile_flags, Parallel(c_tidy, c_analyzer))
+
 bench = Project("bench")
 
 wheels = Task("nix build .#default --out-link result-wheels", when=NIX_INPUTS, mutates=True)
@@ -38,7 +55,7 @@ flake_check = Task("nix flake check", when=NIX_INPUTS)
 
 test = Parallel(Sequential(build, pytest), matrix={"PY": PYTHONS})
 benchmark = Sequential(Task("uv run python setup.py build_ext --inplace", mutates=True), bench)
-check = Parallel(test, format_check)
+check = Parallel(test, format_check, analyze)
 
 # Installed, not compiled: MSVC has no __attribute__((cleanup)), so the Windows
 # leg cannot build this source at all.
@@ -59,6 +76,6 @@ coverage = Parallel(
     ),
 )
 
-ci = Parallel(flake_check, format_check)
+ci = Parallel(flake_check, format_check, analyze)
 
 _ = Config(default_task=check, github_task=ci, agent=Claude(fix=format, check=check))

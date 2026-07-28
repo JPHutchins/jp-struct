@@ -114,6 +114,7 @@
               pkgs.uv
               pkgs.zig
               pkgs.nixfmt
+              pkgs.clang-tools
               pkgs.gdb
               pkgs.git
               jphfmt
