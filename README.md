@@ -16,7 +16,7 @@ Point(x=1.0, y=2.0)
 ```
 
 `jpstruct/__init__.pyi` is the API. `src/jpstruct.c` says what this is and is
-not. `uv run camas benchmark` says what it costs.
+not. `tasks.py` is what runs. `uv run camas benchmark` says what it costs.
 
 ## Working in the repo
 
@@ -24,9 +24,6 @@ not. `uv run camas benchmark` says what it costs.
 nix develop
 uv run camas check
 ```
-
-`tasks.py` is what runs, here and in CI. Reach camas through `uv run` — a
-`camas` on `PATH` is whatever version is installed globally.
 
 ## License
 
