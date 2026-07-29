@@ -39,4 +39,8 @@ reportUnnecessaryTypeIgnoreComment = "error"
 members = ["bench", "tests", "tools"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+# README.md is here because its examples are the only claims about the API
+# written in prose, so they are run rather than proof-read. testpaths is what
+# decides -- a --doctest-glob alone collects nothing outside it.
+testpaths = ["tests", "README.md"]
+addopts = "--doctest-glob=README.md"

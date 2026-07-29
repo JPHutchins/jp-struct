@@ -12,7 +12,4 @@ import sys
 from pathlib import Path
 
 if importlib.util.find_spec("jpstruct") is None:
-    _root = Path(__file__).resolve().parent.parent
-
-    for _directory in (_root / "src", _root):
-        sys.path.insert(0, str(_directory))
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
