@@ -68,7 +68,8 @@ def test_a_struct_hashes_as_the_tuple_of_its_values(first, second):
 def test_equality_implies_equal_hashes(first, second):
     left, right = Pair(first, second), Pair(first, second)
 
-    assert not (left == right) or hash(left) == hash(right)
+    # SIM201: the claim is about __eq__, and != is a different operator.
+    assert not (left == right) or hash(left) == hash(right)  # noqa: SIM201
 
 
 @given(st.lists(IDENTIFIERS, min_size=0, max_size=6, unique=True))

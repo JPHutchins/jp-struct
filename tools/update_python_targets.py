@@ -11,8 +11,9 @@ import json
 import re
 import subprocess
 import urllib.request
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, Iterator, NamedTuple
+from typing import Any, NamedTuple
 
 RELEASES = "https://api.github.com/repos/astral-sh/python-build-standalone/releases"
 # The freethreaded builds are the same triples under a variant suffix, and

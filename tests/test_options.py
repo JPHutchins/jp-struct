@@ -73,7 +73,7 @@ class TestEq:
     def test_identity_replaces_structural_equality(self):
         instance = NoEq(1)
 
-        assert instance == instance
+        assert instance == instance  # noqa: PLR0124 -- reflexivity is the assertion
         assert NoEq(1) != NoEq(1)
 
     def test_the_hash_becomes_the_identity_hash(self):

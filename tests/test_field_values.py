@@ -46,7 +46,7 @@ def test_repr_embeds_the_field_reprs(value):
 def test_a_struct_equals_itself_whatever_it_holds(value):
     pair = Pair(value, value)
 
-    assert pair == pair
+    assert pair == pair  # noqa: PLR0124 -- reflexivity is the assertion
 
 
 @pytest.mark.parametrize("value", HASHABLE, ids=identify)
@@ -57,7 +57,7 @@ def test_a_hashable_field_makes_a_hashable_struct(value):
 def refuses_to_hash_with(value: object) -> type[BaseException]:
     try:
         hash(value)
-    except BaseException as error:
+    except BaseException as error:  # noqa: BLE001 -- the type is what is being derived
         return type(error)
 
     raise AssertionError(f"{value!r} is hashable, so it does not belong in UNHASHABLE")

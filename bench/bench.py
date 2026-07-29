@@ -24,8 +24,9 @@ import subprocess
 import sys
 import tempfile
 import timeit
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, NamedTuple
+from typing import NamedTuple
 
 K = 200
 RUNS = 5
@@ -39,7 +40,7 @@ for _p in reversed(_PATHS):
     if _p not in sys.path:
         sys.path.insert(0, _p)
 _ENV = {**os.environ, "PYTHONPATH": os.pathsep.join(
-    _PATHS + [os.environ.get("PYTHONPATH", "")]).rstrip(os.pathsep)}
+    [*_PATHS, os.environ.get("PYTHONPATH", "")]).rstrip(os.pathsep)}
 
 
 class Construct(NamedTuple):
@@ -90,7 +91,7 @@ _LINE = re.compile(r"import time:\s+(\d+)\s+\|\s+(\d+)\s+\|\s+(.*)")
 def _importtime(stmt: str, target: str, cwd: Path) -> tuple[int, int]:
     proc = subprocess.run(
         [sys.executable, "-X", "importtime", "-c", stmt],
-        capture_output=True, text=True, cwd=str(cwd), env=_ENV,
+        capture_output=True, text=True, cwd=str(cwd), env=_ENV, check=True,
     )
     for line in proc.stderr.splitlines():
         m = _LINE.match(line)
@@ -192,11 +193,12 @@ def main() -> None:
     nt = next(r for r in rows if r[0].startswith("typing.NamedTuple"))
     ms = next(r for r in rows if r[0].startswith("msgspec"))
     print("\nTotal startup to define N struct types = import_ms + N * us/type/1000")
+    def total(r: tuple[str, float, float, float], n: int) -> float:
+        return r[1] + n * r[2] / 1000
+
     for n in (1, 10, 100, 1000):
-        def total(r: tuple[str, float, float, float]) -> float:
-            return r[1] + n * r[2] / 1000
-        print(f"  N={n:<5}  jpstruct {total(jpstruct_row):8.3f} ms   "
-              f"NamedTuple {total(nt):8.3f} ms   msgspec {total(ms):8.3f} ms")
+        print(f"  N={n:<5}  jpstruct {total(jpstruct_row, n):8.3f} ms   "
+              f"NamedTuple {total(nt, n):8.3f} ms   msgspec {total(ms, n):8.3f} ms")
 
 
 if __name__ == "__main__":

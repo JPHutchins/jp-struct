@@ -36,7 +36,7 @@ def run_on_every_thread(work):
     def guarded():
         try:
             work()
-        except BaseException as failure:
+        except BaseException as failure:  # noqa: BLE001 -- any failure in a thread is the result
             failures.append(failure)
 
     threads = [threading.Thread(target=guarded) for _ in range(THREADS)]

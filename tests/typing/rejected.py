@@ -76,10 +76,6 @@ def an_unknown_class_keyword_is_rejected() -> None:
 
 
 def match_args_false_leaves_no_positional_pattern() -> None:
-    """pyright's alone: the stub declares __match_args__ as a tuple of unknown
-    length, which is all mypy reads, so it cannot count the sub-patterns.
-    """
-
     match NoMatchArgs(1):
-        case NoMatchArgs(rank):  # pyright: ignore[reportGeneralTypeIssues]
+        case NoMatchArgs(rank):  # type: ignore[misc]
             print(rank)

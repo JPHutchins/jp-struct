@@ -13,8 +13,9 @@ import hashlib
 import struct
 import sys
 import zipfile
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Iterator, NamedTuple
+from typing import NamedTuple
 
 ELF_MAGIC = b"\x7fELF"
 MACHO_64_MAGIC = b"\xcf\xfa\xed\xfe"

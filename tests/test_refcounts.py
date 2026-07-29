@@ -98,7 +98,8 @@ def test_reading_a_field_does_not_accumulate():
 
 @pytest.mark.parametrize(
     "operation",
-    [repr, hash, lambda pair: pair == pair, lambda pair: pair != pair],
+    # PLR0124: comparing an instance with itself is what exercises the dunder.
+    [repr, hash, lambda pair: pair == pair, lambda pair: pair != pair],  # noqa: PLR0124
     ids=["repr", "hash", "eq", "ne"],
 )
 def test_the_dunders_do_not_leak(operation):

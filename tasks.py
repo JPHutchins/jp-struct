@@ -85,12 +85,17 @@ ty = Task(
 # --explicit-package-bases, because bench/tasks.py and tasks.py are both
 # `tasks` otherwise.
 tooling = Task(
-    TYPE_CHECK + " --with mypy --with camas --with setuptools --with msgspec --with record-type"
+    TYPE_CHECK + " --with mypy --with camas --with setuptools --with types-setuptools"
+    " --with msgspec --with record-type"
     " mypy --strict --warn-unused-ignores --explicit-package-bases"
-    " tasks.py build_config.py tools/ bench/",
+    " setup.py tasks.py build_config.py tools/ bench/",
     env={"MYPYPATH": "."},
 )
 type_check = Parallel(mypy, pyright, ty, tooling)
+
+# Lint, not format: the style here is the style already in the files, so ruff
+# runs as a checker and never as a formatter. The rule set is in pyproject.
+lint = Task("uv run --no-project --with ruff ruff check .")
 
 bench = Project("bench")
 
@@ -106,9 +111,11 @@ flake_check = Task("nix flake check --all-systems", when=NIX_INPUTS)
 
 test = Parallel(Sequential(build, pytest), matrix={"PY": PYTHONS})
 
-# Kept out of .python-version, which is also the wheel matrix, and there are no
-# free-threaded wheels yet. A module that does not declare Py_mod_gil silently
-# re-enables the GIL, so the declaration needs a build that would notice.
+# The wheel matrix does build free-threaded targets, derived from these names
+# rather than listed alongside them: a `3.14t` in .python-version would enter
+# the test matrix too, where uv cannot keep it apart from `3.14` (below). One
+# leg is enough -- a module that does not declare Py_mod_gil silently
+# re-enables the GIL, and this is the build that would notice.
 FREE_THREADED = "3.14t"
 
 # uv resolves a plain `--python 3.14` to a free-threaded interpreter as soon as
@@ -124,7 +131,7 @@ free_threaded_pytest = Task(
 )
 free_threaded = Sequential(free_threaded_build, free_threaded_pytest)
 benchmark = Sequential(Task("uv run python setup.py build_ext --inplace", mutates=True), bench)
-check = Parallel(test, free_threaded, format_check, analyze, c_test, type_check)
+check = Parallel(test, free_threaded, format_check, lint, analyze, c_test, type_check)
 
 # Installed, not compiled: MSVC has no __attribute__((cleanup)), so the Windows
 # leg cannot build this source at all.
@@ -155,8 +162,8 @@ wheel_test = Task(
 # Sampled rather than crossed, to stay inside the OSS concurrency limit.
 coverage = Parallel(
     wheel_test,
-    variants=tuple({"OS": "ubuntu-latest", "PY": python} for python in PYTHONS)
-    + (
+    variants=(
+        *({"OS": "ubuntu-latest", "PY": python} for python in PYTHONS),
         {"OS": "macos-latest", "PY": OLDEST},
         {"OS": "macos-latest", "PY": NEWEST},
         {"OS": "windows-latest", "PY": OLDEST},
@@ -164,6 +171,6 @@ coverage = Parallel(
     ),
 )
 
-ci = Parallel(flake_check, free_threaded, format_check, analyze, type_check)
+ci = Parallel(flake_check, free_threaded, format_check, lint, analyze, type_check)
 
 _ = Config(default_task=check, github_task=ci, agent=Claude(fix=format, check=check))

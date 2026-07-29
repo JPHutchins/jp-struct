@@ -47,6 +47,40 @@ package = false
 [tool.uv.workspace]
 members = ["bench", "tests", "tools"]
 
+[tool.ruff]
+# Lint only. There is no ruff format here and there should not be: CLAUDE.md
+# says follow the style already in the code base, not a common one.
+[tool.ruff.lint]
+# Rules that find defects, not rules that have opinions about layout. E402 is
+# in because setup.py and compile_flags.py both put an import after a
+# sys.path.insert on purpose, and the suppression is worth having to write.
+# PLE/PLW are pylint's defect rules; PLC and PLR are its opinions about
+# layout and magic numbers, which fight ordinary test code. PLR0124 is the
+# one refactor rule that finds a real mistake.
+select = [
+    "F",
+    "E4",
+    "E7",
+    "E9",
+    "E402",
+    "B",
+    "BLE",
+    "FLY",
+    "I",
+    "PLE",
+    "PLW",
+    "PLR0124",
+    "PYI",
+    "RUF",
+    "SIM",
+    "UP",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# The file exists to hold expressions a checker must reject, so of course they
+# are pointless comparisons and useless attribute accesses. That is the test.
+"tests/typing/rejected.py" = ["B015", "B018"]
+
 [tool.pytest.ini_options]
 # README.md is here because its examples are the only claims about the API
 # written in prose, so they are run rather than proof-read. testpaths is what

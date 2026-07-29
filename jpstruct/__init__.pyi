@@ -1,4 +1,4 @@
-from typing import Any, ClassVar
+from typing import Any
 
 from typing_extensions import dataclass_transform
 
@@ -8,7 +8,6 @@ class StructMeta(type):
 
 @dataclass_transform(frozen_default=True)
 class Struct(metaclass=StructMeta):
-    __match_args__: ClassVar[tuple[str, ...]]
     __struct_fields__: tuple[str, ...]
     __struct_defaults__: tuple[Any, ...]
     def __init_subclass__(

@@ -18,7 +18,7 @@ from setuptools import Extension, setup
 # not a distribution to be resolved.
 sys.path.insert(0, str(Path(__file__).parent))
 
-from build_config import BUILD  # noqa: E402
+from build_config import BUILD
 
 setup(
     ext_modules=[

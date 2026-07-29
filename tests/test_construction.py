@@ -69,7 +69,7 @@ def test_the_same_field_given_twice():
 def test_a_keyword_name_built_at_runtime_still_resolves():
     """The fast path compares interned names by identity; this misses it."""
 
-    name = "".join(["value_", "one"])
+    name = "".join(["value_", "one"])  # noqa: FLY002 -- a literal would be interned
 
     assert name is not "value_one"  # noqa: F632
     assert Renamed(**{name: 1}, value_two=2).value_one == 1
