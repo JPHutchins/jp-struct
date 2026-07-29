@@ -104,10 +104,21 @@ bench = Project("bench")
 c_test = Task("nix build .#c-tests --no-link", when=NIX_INPUTS)
 
 wheels = Task("nix build .#default --out-link result-wheels", when=NIX_INPUTS, mutates=True)
-# --all-systems: the checks are defined for all four, but a builder only builds
-# the one it is, so without this the other three are never even evaluated and a
-# typo in a darwin or aarch64 path is found by nobody.
-flake_check = Task("nix flake check --all-systems", when=NIX_INPUTS)
+# Two steps, because building and evaluating are different questions and only
+# one of them is portable. `nix flake check` builds the checks for the machine
+# it is on and silently omits the rest. `--all-systems` does not fix that: it
+# makes nix *build* the others, which no single runner can do -- an x86_64 CI
+# box cannot build the aarch64-darwin check, and that is what turned CI red.
+#
+# `nix flake show` forces every output on every system to evaluate without
+# building any of it, in about a second, which is the part that catches a typo
+# in a darwin or aarch64 path.
+# sh -c, because camas does not run a shell and the point is the exit status,
+# not the 50KB of JSON that proves it got there.
+flake_evaluates = Task(
+    "sh -c 'nix flake show --all-systems --json > /dev/null'", when=NIX_INPUTS
+)
+flake_check = Sequential(flake_evaluates, Task("nix flake check", when=NIX_INPUTS))
 
 test = Parallel(Sequential(build, pytest), matrix={"PY": PYTHONS})
 
