@@ -8,10 +8,13 @@
     let
       inherit (nixpkgs) lib;
 
+      # Which machines can run this flake, which is not the same question as
+      # which wheels it builds -- macos-x86_64 is a zig cross target and is
+      # unaffected. nixpkgs 26.11 dropped x86_64-darwin, so claiming it here is
+      # an evaluation error rather than a capability.
       systems = [
         "x86_64-linux"
         "aarch64-linux"
-        "x86_64-darwin"
         "aarch64-darwin"
       ];
       forAllSystems = lib.genAttrs systems;
@@ -172,8 +175,10 @@
         // {
           c-tests = cTests;
 
+          # The directory rather than a list of files: three of the six were
+          # missing from the list, and a list is a second place to remember.
           nixfmt = pkgs.runCommand "nixfmt-check" { nativeBuildInputs = [ pkgs.nixfmt ]; } ''
-            nixfmt --check ${./flake.nix} ${./nix/wheel.nix} ${./nix/python-targets.nix}
+            nixfmt --check ${./flake.nix} ${./nix}/*.nix
             touch $out
           '';
 

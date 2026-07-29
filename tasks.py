@@ -99,7 +99,10 @@ bench = Project("bench")
 c_test = Task("nix build .#c-tests --no-link", when=NIX_INPUTS)
 
 wheels = Task("nix build .#default --out-link result-wheels", when=NIX_INPUTS, mutates=True)
-flake_check = Task("nix flake check", when=NIX_INPUTS)
+# --all-systems: the checks are defined for all four, but a builder only builds
+# the one it is, so without this the other three are never even evaluated and a
+# typo in a darwin or aarch64 path is found by nobody.
+flake_check = Task("nix flake check --all-systems", when=NIX_INPUTS)
 
 test = Parallel(Sequential(build, pytest), matrix={"PY": PYTHONS})
 
