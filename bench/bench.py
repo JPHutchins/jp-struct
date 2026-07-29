@@ -25,7 +25,7 @@ import sys
 import tempfile
 import timeit
 from pathlib import Path
-from typing import Callable, NamedTuple
+from typing import Any, Callable, NamedTuple
 
 K = 200
 RUNS = 5
@@ -117,9 +117,9 @@ def dep_ms(c: Construct, work: Path) -> float:
     return statistics.median(samples) / 1000
 
 
-def build_constructors() -> dict[str, Callable]:
+def build_constructors() -> dict[str, Callable[[int, int, int], object]]:
     """Real in-process 3-field constructors (avoids exec/PEP-649 quirks)."""
-    out: dict[str, Callable] = {}
+    out: dict[str, Callable[[int, int, int], object]] = {}
 
     from jpstruct import Struct
 
@@ -154,17 +154,19 @@ def build_constructors() -> dict[str, Callable]:
         c: int
     out["gen_dcfrozen"] = DC
 
-    from records import record
+    from records import record  # type: ignore[import-untyped]
 
-    @record
-    def RT(a: int, b: int, c: int):
+    # record reads the return annotation and refuses one that is not None,
+    # so this signature is the decorator's requirement, not an oversight.
+    @record  # type: ignore[untyped-decorator]
+    def RT(a: int, b: int, c: int):  # type: ignore[no-untyped-def]
         ...
     out["gen_recordtype"] = RT
 
     return out
 
 
-def instantiate_ns(ctor: Callable) -> float:
+def instantiate_ns(ctor: Callable[[int, int, int], object]) -> float:
     best = min(timeit.repeat(lambda: ctor(1, 2, 3), repeat=RUNS, number=1_000_000))
     return best / 1_000_000 * 1e9
 
@@ -191,7 +193,7 @@ def main() -> None:
     ms = next(r for r in rows if r[0].startswith("msgspec"))
     print("\nTotal startup to define N struct types = import_ms + N * us/type/1000")
     for n in (1, 10, 100, 1000):
-        def total(r):
+        def total(r: tuple[str, float, float, float]) -> float:
             return r[1] + n * r[2] / 1000
         print(f"  N={n:<5}  jpstruct {total(jpstruct_row):8.3f} ms   "
               f"NamedTuple {total(nt):8.3f} ms   msgspec {total(ms):8.3f} ms")

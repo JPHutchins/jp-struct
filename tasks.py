@@ -75,7 +75,22 @@ pyright = Task(TYPE_CHECK + " --with pyright pyright --pythonversion " + OLDEST 
 ty = Task(
     TYPE_CHECK + " --with ty ty check --python-version " + OLDEST + " tests/typing/accepted.py"
 )
-type_check = Parallel(mypy, pyright, ty)
+
+# The repo's own Python, which is a different question from the stub's: these
+# are programs, not assertions about the API, so they are checked on the newest
+# interpreter rather than the floor, and record-type does not reach the floor
+# anyway. tests/ is excluded on purpose -- passing a wrong type is what most of
+# those tests do, and tests/typing is where typing is asserted.
+#
+# --explicit-package-bases, because bench/tasks.py and tasks.py are both
+# `tasks` otherwise.
+tooling = Task(
+    TYPE_CHECK + " --with mypy --with camas --with setuptools --with msgspec --with record-type"
+    " mypy --strict --warn-unused-ignores --explicit-package-bases"
+    " tasks.py build_config.py tools/ bench/",
+    env={"MYPYPATH": "."},
+)
+type_check = Parallel(mypy, pyright, ty, tooling)
 
 bench = Project("bench")
 

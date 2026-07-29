@@ -12,7 +12,7 @@ import re
 import subprocess
 import urllib.request
 from pathlib import Path
-from typing import Iterator, NamedTuple
+from typing import Any, Iterator, NamedTuple
 
 RELEASES = "https://api.github.com/repos/astral-sh/python-build-standalone/releases"
 ASSET = re.compile(
@@ -81,11 +81,13 @@ PLATFORMS: dict[str, Platform] = {
 }
 
 
-def fetch(url: str) -> dict:
+def fetch(url: str) -> dict[str, Any]:
     request = urllib.request.Request(url, headers={"User-Agent": "jp-struct-update-targets"})
 
     with urllib.request.urlopen(request) as response:
-        return json.load(response)
+        loaded: dict[str, Any] = json.load(response)
+
+    return loaded
 
 
 def to_sri(digest: str) -> str:
