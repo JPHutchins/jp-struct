@@ -58,6 +58,8 @@ static enum result install_fields(
 	struct options options
 );
 static enum result install_post_init(StructType * struct_class);
+static bool defines_own_init(StructType const * struct_class);
+static PyObject * StructMeta_call(PyObject * self, PyObject * args, PyObject * keywords);
 static Py_ssize_t * resolve_slot_offsets(
 	StructType * struct_class,
 	StructType const * base,
@@ -83,7 +85,7 @@ PyTypeObject StructMeta_Type = {
 	.tp_dealloc = StructMeta_dealloc,
 	.tp_traverse = StructMeta_traverse,
 	.tp_clear = StructMeta_clear,
-	.tp_call = PyVectorcall_Call,
+	.tp_call = StructMeta_call,
 	.tp_vectorcall_offset = offsetof(PyTypeObject, tp_vectorcall),
 	.tp_getset = StructMeta_getset,
 };
@@ -410,9 +412,45 @@ static enum result install_fields(
 	struct_class->struct_field_count = field_count;
 	struct_class->struct_default_count = PyTuple_GET_SIZE(plan->defaults);
 	struct_class->struct_options = options;
-	struct_class->heap_type.ht_type.tp_vectorcall = Struct_vectorcall;
+
+	/* The mixin has no tp_new, because nothing ever needed one: the vectorcall
+	 * allocates. A class that declined it needs the generic one to get as far
+	 * as its own __init__ -- and only such a class, so the mixin itself stays
+	 * uninstantiable and nothing can hold a struct's dunders over an object
+	 * that has no field table. */
+	if (defines_own_init(struct_class)) {
+		struct_class->heap_type.ht_type.tp_new = PyType_GenericNew;
+	} else {
+		struct_class->heap_type.ht_type.tp_vectorcall = Struct_vectorcall;
+	}
 
 	return install_post_init(struct_class);
+}
+
+/*
+ * A body that writes its own __init__ means it. The generated constructor is
+ * what a struct gets, not what it is stuck with, and leaving the vectorcall
+ * installed would discard the definition in silence -- tp_call never reaches
+ * tp_init once tp_vectorcall answers.
+ *
+ * tp_init rather than a lookup: it is object's until something in the MRO
+ * defines __init__, at which point the type machinery has already replaced it
+ * with the dispatching slot. That covers an inherited one for free.
+ */
+static bool defines_own_init(StructType const * const struct_class) {
+	return struct_class->heap_type.ht_type.tp_init != PyBaseObject_Type.tp_init;
+}
+
+/* PyVectorcall_Call cannot answer for the classes that just declined the
+ * vectorcall, and type.__call__ is what they want anyway. */
+static PyObject * StructMeta_call(
+	PyObject * const self,
+	PyObject * const args,
+	PyObject * const keywords
+) {
+	return ((PyTypeObject *) self)->tp_vectorcall != NULL
+		? PyVectorcall_Call(self, args, keywords)
+		: PyType_Type.tp_call(self, args, keywords);
 }
 
 /*
