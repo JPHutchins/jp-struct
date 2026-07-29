@@ -10,8 +10,9 @@ them -- caught here, before an upload that cannot be taken back.
 from __future__ import annotations
 
 import sys
-import tomllib
 from pathlib import Path
+
+import tomllib
 
 
 def declared_version(pyproject: Path) -> str:
