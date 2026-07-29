@@ -29,6 +29,14 @@
       );
       pinnedPythons = lib.sort (a: b: a < b) (builtins.attrNames matrix.pythons);
 
+      # A free-threaded target is a variant of a declared interpreter, not a
+      # separate one, so what has to agree with .python-version is the pinned
+      # set with the variants folded back in. Which minors get one is the
+      # release's answer, not something to restate here.
+      pinnedBaseline = lib.sort (a: b: a < b) (
+        lib.unique (map (name: lib.removeSuffix "t" name) pinnedPythons)
+      );
+
       wheelIds = lib.concatMap (
         pythonMinor:
         map (platformName: { inherit pythonMinor platformName; }) (
@@ -109,7 +117,7 @@
 
       forSystem = forAllSystems perSystem;
     in
-    assert lib.assertMsg (declaredPythons == pinnedPythons) (
+    assert lib.assertMsg (declaredPythons == pinnedBaseline) (
       ".python-version lists ${toString declaredPythons} but nix/python-targets.nix pins "
       + "${toString pinnedPythons}; regenerate with tools/update_python_targets.py"
     );

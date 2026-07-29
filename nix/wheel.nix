@@ -34,7 +34,7 @@ let
     url =
       "https://github.com/astral-sh/python-build-standalone/releases/download/"
       + "${release}/cpython-${python.version}+${release}-"
-      + "${platform.pbsTriple}-install_only_stripped.tar.gz";
+      + "${platform.pbsTriple}${python.pbsVariant}-install_only_stripped.tar.gz";
     hash = python.hashes.${platformName};
   };
 in
@@ -87,7 +87,7 @@ stdenvNoCC.mkDerivation {
     wheel pack --dest-dir "$out" "''${unpacked[0]}"
     wheel tags --remove \
       --python-tag ${python.tag} \
-      --abi-tag ${python.tag} \
+      --abi-tag ${python.abiTag} \
       --platform-tag ${platform.platformTag} \
       "$out"/*.whl
 
