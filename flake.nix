@@ -54,6 +54,10 @@
           ./build_config.py
           ./setup.py
           ./pyproject.toml
+          # Without it the sdist has no build_config.py and no headers, and so
+          # cannot build. A wheel does not care; the sdist is the only thing
+          # that reads it, and it is the only thing that notices.
+          ./MANIFEST.in
           ./README.md
           ./LICENSE
         ];
@@ -103,6 +107,15 @@
           jphfmt = pkgs.callPackage ./nix/jphfmt.nix { };
 
           cTests = pkgs.callPackage ./nix/c-tests.nix { src = testSource; };
+
+          sdist = pkgs.callPackage ./nix/sdist.nix { src = buildSource; };
+
+          # What a release uploads: every wheel and the one sdist, in the shape
+          # `twine upload` wants.
+          release = pkgs.symlinkJoin {
+            name = "jp-struct-release";
+            paths = lib.attrValues wheels ++ [ sdist ];
+          };
         in
         {
           inherit
@@ -112,6 +125,8 @@
             named
             jphfmt
             cTests
+            sdist
+            release
             ;
         };
 
@@ -128,6 +143,7 @@
         // {
           default = forSystem.${system}.all;
           c-tests = forSystem.${system}.cTests;
+          inherit (forSystem.${system}) sdist release;
         }
       );
 
@@ -177,6 +193,7 @@
             all
             named
             cTests
+            sdist
             ;
         in
         named
@@ -204,7 +221,7 @@
               }
               ''
                 python ${./tools/check_wheel.py} ${all}/*.whl
-                twine check --strict ${all}/*.whl
+                twine check --strict ${all}/*.whl ${sdist}/*.tar.gz
                 touch $out
               '';
         }

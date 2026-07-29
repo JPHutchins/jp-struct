@@ -1,0 +1,43 @@
+name: Release
+
+# A tag is the trigger and pyproject.toml is the version; check_tag.py refuses
+# the pair if they disagree. Nothing here runs on a branch, so a release is
+# always something someone tagged on purpose.
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      # Trusted Publishing: PyPI takes a short-lived OIDC token from this
+      # workflow, so there is no API token to hold, rotate or leak.
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: nix-community/cache-nix-action@v7
+        with:
+          primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.lock', 'flake.nix', 'nix/**') }}
+          restore-prefixes-first-match: nix-${{ runner.os }}-
+          gc-max-store-size-linux: 5G
+
+      - run: nix develop --command python tools/check_tag.py "${{ github.ref_name }}"
+
+      # The same check CI runs, on the same source: every wheel built and
+      # verified, the payloads matched to their tags, twine --strict over all of
+      # them and the sdist, and the native wheel installed and tested.
+      - run: nix flake check --all-systems
+
+      - run: nix build .#release --out-link result-release
+
+      # dist/ because that is where the publish action looks, and a symlink
+      # into the nix store is not something it can read.
+      - run: |
+          mkdir -p dist
+          cp -L result-release/*.whl result-release/*.tar.gz dist/
+          ls -l dist
+
+      - uses: pypa/gh-action-pypi-publish@release/v1

@@ -35,6 +35,15 @@ dev = ["setuptools>=77", "camas[mcp]==0.1.29"]
 # the checkers mean some of those suppressions are pyright's alone.
 reportUnnecessaryTypeIgnoreComment = "error"
 
+[tool.uv]
+# uv must never install this project. It is a C extension, and an editable
+# install puts a finder on the path whose `jpstruct` is a namespace package
+# over the repo directory -- which then shadows the wheel in the leg whose
+# whole job is to import an installed one. CI passes --no-install-workspace for
+# the same reason; this is that, for everyone who forgets. The extension comes
+# from the in-place build or from a wheel, never from here.
+package = false
+
 [tool.uv.workspace]
 members = ["bench", "tests", "tools"]
 
