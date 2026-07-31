@@ -53,6 +53,13 @@ class Construct(NamedTuple):
     ctor: Callable[[], Callable[[int, int, int], object]]
 
 
+class Row(NamedTuple):
+    label: str
+    dep_ms: float
+    per_type_us: float
+    instantiate_ns: float
+
+
 def _struct(i: int) -> str:
     return f"class C{i}(Struct):\n    a: int\n    b: int\n    c: int\n"
 
@@ -126,8 +133,10 @@ def _record_type_ctor() -> Callable[[int, int, int], object]:
     return C  # type: ignore[no-any-return]
 
 
+# An unbuilt salix/ still holds py.typed and the stub, which makes it a
+# namespace package: find_spec answers, and the module it names is empty.
 def _installed(dep: str | None) -> bool:
-    return dep is None or find_spec(dep) is not None
+    return dep is None or ((spec := find_spec(dep)) is not None and spec.loader is not None)
 
 
 # A rival to measure against, not a requirement: record-type carries a
@@ -203,22 +212,22 @@ def main() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         work = Path(tmp)
         rows = {
-            c.key: (c.label, dep_ms(c, work), per_type_us(c, work),
-                    instantiate_ns(ctors[c.key]))
+            c.key: Row(c.label, dep_ms(c, work), per_type_us(c, work),
+                       instantiate_ns(ctors[c.key]))
             for c in CONSTRUCTS
         }
 
-    w = max(len(r[0]) for r in rows.values())
+    w = max(len(r.label) for r in rows.values())
     print(f"{'construct':<{w}} {'import ms':>10} {'us/type':>9} {'inst ns':>9}")
     print("-" * (w + 31))
-    for label, dep, us, ns in rows.values():
-        print(f"{label:<{w}} {dep:>10.3f} {us:>9.1f} {ns:>9.1f}")
+    for r in rows.values():
+        print(f"{r.label:<{w}} {r.dep_ms:>10.3f} {r.per_type_us:>9.1f} {r.instantiate_ns:>9.1f}")
 
     print("\nTotal startup to define N struct types = import_ms + N * us/type/1000")
-    def total(r: tuple[str, float, float, float], n: int) -> float:
-        return r[1] + n * r[2] / 1000
+    def total(r: Row, n: int) -> float:
+        return r.dep_ms + n * r.per_type_us / 1000
 
-    headline = [(rows[k][0].split()[0], rows[k]) for k in HEADLINE if k in rows]
+    headline = [(rows[k].label.split()[0], rows[k]) for k in HEADLINE if k in rows]
     for n in (1, 10, 100, 1000):
         print(f"  N={n:<5}  "
               + "   ".join(f"{name} {total(row, n):8.3f} ms" for name, row in headline))
