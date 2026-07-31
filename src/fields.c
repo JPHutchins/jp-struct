@@ -165,19 +165,22 @@ static enum result append_declared(
 	return RESULT_OK;
 }
 
+/* PyObject_RichCompareBool answers -1 for an error and nothing else, so the
+ * three cases are the return value itself -- no PyErr_Occurred() to tell a
+ * failure apart from a "less than", and so no invariant about the exception
+ * state on entry. The same tri-state compare.c reads into `enum comparison`. */
 static enum inheritance inherits_field(StructType const * const base, PyObject * const field_name) {
 	Py_ssize_t const inherited_count = base != NULL ? base->struct_field_count : 0;
 
 	for (Py_ssize_t i = 0; i < inherited_count; ++i) {
-		int const compared =
-			PyUnicode_Compare(field_name, PyTuple_GET_ITEM(base->struct_field_names, i));
+		enum inheritance const inherited = PyObject_RichCompareBool(
+			field_name,
+			PyTuple_GET_ITEM(base->struct_field_names, i),
+			Py_EQ
+		);
 
-		if (compared == 0) {
-			return INHERITANCE_INHERITED;
-		}
-
-		if (compared == -1 && PyErr_Occurred()) {
-			return INHERITANCE_ERROR;
+		if (inherited != INHERITANCE_NEW) {
+			return inherited;
 		}
 	}
 
