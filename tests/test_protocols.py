@@ -2,7 +2,7 @@
 
 import pytest
 
-from salix import Struct
+from salix import Struct, set_field
 
 
 class Point(Struct):
@@ -70,6 +70,17 @@ def test_equal_structs_share_a_hash_bucket():
 def test_an_unhashable_field_makes_the_struct_unhashable():
     with pytest.raises(TypeError, match="unhashable"):
         hash(Nested([1]))
+
+
+def test_hash_of_a_struct_that_contains_itself():
+    class Node(Struct):
+        child: object = None
+
+    node = Node()
+    set_field(node, "child", node)
+
+    with pytest.raises(RecursionError):
+        hash(node)
 
 
 def test_repr_round_trips_through_eval():

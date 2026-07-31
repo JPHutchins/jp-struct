@@ -2,6 +2,7 @@
 
 #include "compare.h"
 #include "mixin.h"
+#include "owned.h"
 #include "types.h"
 
 /* The tri-state PyObject_RichCompareBool speaks, named. */
@@ -52,6 +53,9 @@ static PyObject * equality_result(PyObject * const self, PyObject * const other,
  * compare in. Both classes have to have asked for ordering, because a class
  * that did not is not orderable, and being compared against one that did does
  * not change that.
+ *
+ * The values are owned rather than borrowed: the equality probe runs arbitrary
+ * Python, which can rebind either slot before the unequal branch reads them.
  */
 static PyObject * ordering_result(PyObject * const self, PyObject * const other, int const op) {
 	StructType const * const self_type = struct_type_of(self);
@@ -71,8 +75,8 @@ static PyObject * ordering_result(PyObject * const self, PyObject * const other,
 	}
 
 	for (Py_ssize_t i = 0; i < self_type->struct_field_count; ++i) {
-		PyObject * const mine = struct_slot_or_none(self_type, self, i);
-		PyObject * const theirs = struct_slot_or_none(other_type, other, i);
+		PY_OWNED(mine, Py_NewRef(struct_slot_or_none(self_type, self, i)));
+		PY_OWNED(theirs, Py_NewRef(struct_slot_or_none(other_type, other, i)));
 		int const equal = PyObject_RichCompareBool(mine, theirs, Py_EQ);
 
 		if (equal == COMPARISON_ERROR) {
@@ -111,6 +115,8 @@ static enum comparison names_equal(
 	);
 }
 
+/* Borrowed slots are sound here and not in ordering_result: the comparison is
+ * the last use of either pointer. */
 static enum comparison values_equal(
 	StructType const * const self_type,
 	PyObject * const self,

@@ -11,7 +11,7 @@ import weakref
 import pytest
 from values import EVERY, HASHABLE, identify
 
-from salix import Struct
+from salix import Struct, set_field
 
 
 class Plain(Struct):
@@ -169,6 +169,21 @@ class TestOrder:
 
         with pytest.raises(TypeError):
             _ = Holder(object()) < Holder(object())
+
+    def test_a_field_that_rewrites_its_own_slot_mid_comparison(self):
+        class Fickle:
+            def __eq__(self, other):
+                set_field(holder, "x", 0)
+                return False
+
+            def __lt__(self, other):
+                return True
+
+            __hash__ = None
+
+        holder = Ordered(Fickle(), 1)
+
+        assert holder < Ordered(Fickle(), 2)
 
     def test_it_is_inherited(self):
         class Child(Ordered):
