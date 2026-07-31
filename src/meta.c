@@ -1,6 +1,7 @@
 #include <Python.h>
 #include <stdbool.h>
 #include <stddef.h>
+#include <string.h>
 
 #include "construct.h"
 #include "fields.h"
@@ -17,7 +18,7 @@
 
 /* Where type.__new__ placed the slot it created for a field name. */
 struct member_lookup {
-	enum { MEMBER_LOOKUP_FOUND, MEMBER_LOOKUP_MISSING } tag;
+	enum { MEMBER_LOOKUP_FOUND, MEMBER_LOOKUP_MISSING, MEMBER_LOOKUP_ERROR } tag;
 	Py_ssize_t offset;
 };
 
@@ -538,6 +539,9 @@ static Py_ssize_t * resolve_slot_offsets(
 		struct member_lookup const found = find_member(members, member_count, field_name);
 
 		switch (found.tag) {
+			case MEMBER_LOOKUP_ERROR:
+				PyMem_Free(offsets);
+				return NULL;
 			case MEMBER_LOOKUP_MISSING:
 				PyErr_Format(PyExc_RuntimeError, "could not find slot offset for %R", field_name);
 				PyMem_Free(offsets);
@@ -556,8 +560,20 @@ static struct member_lookup find_member(
 	Py_ssize_t const member_count,
 	PyObject * const name
 ) {
+	Py_ssize_t name_size = 0;
+	char const * const encoded_name = PyUnicode_AsUTF8AndSize(name, &name_size);
+
+	if (encoded_name == NULL) {
+		return (struct member_lookup){.tag = MEMBER_LOOKUP_ERROR};
+	}
+
 	for (Py_ssize_t i = 0; i < member_count; ++i) {
-		if (PyUnicode_CompareWithASCIIString(name, members[i].name) == 0) {
+		size_t const member_size = strlen(members[i].name);
+
+		if (
+			name_size == (Py_ssize_t) member_size &&
+			memcmp(encoded_name, members[i].name, member_size) == 0
+		) {
 			return (struct member_lookup){.tag = MEMBER_LOOKUP_FOUND, .offset = members[i].offset};
 		}
 	}
@@ -605,6 +621,7 @@ static int StructMeta_clear(PyObject * const self) {
 static PyMemberDef const example_members[] = {
 	{.name = "alpha", .offset = 16},
 	{.name = "beta", .offset = 24},
+	{.name = "café", .offset = 32},
 	{.name = NULL},
 };
 
@@ -618,9 +635,19 @@ static void test_a_declared_member_yields_its_offset(void) {
 	Py_DECREF(name);
 }
 
+static void test_a_non_ascii_member_yields_its_offset(void) {
+	PyObject * const name = PyUnicode_FromString("café");
+	struct member_lookup const found = find_member(example_members, 3, name);
+
+	TEST_ASSERT_EQUAL_INT(MEMBER_LOOKUP_FOUND, found.tag);
+	TEST_ASSERT_EQUAL_INT(32, found.offset);
+
+	Py_DECREF(name);
+}
+
 static void test_an_undeclared_member_is_missing(void) {
 	PyObject * const name = PyUnicode_FromString("gamma");
-	struct member_lookup const found = find_member(example_members, 2, name);
+	struct member_lookup const found = find_member(example_members, 3, name);
 
 	TEST_ASSERT_EQUAL_INT(MEMBER_LOOKUP_MISSING, found.tag);
 
@@ -641,6 +668,7 @@ void meta_tests(void) {
 	Unity.TestFile = __FILE__;
 
 	RUN_TEST(test_a_declared_member_yields_its_offset);
+	RUN_TEST(test_a_non_ascii_member_yields_its_offset);
 	RUN_TEST(test_an_undeclared_member_is_missing);
 	RUN_TEST(test_the_search_respects_the_declared_count);
 }
