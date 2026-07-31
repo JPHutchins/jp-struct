@@ -8,11 +8,12 @@ description: Nix toolchain + store cache + a warmed dev shell and uv environment
 runs:
   using: composite
   steps:
-    - uses: nixbuild/nix-quick-install-action@v35
-      with:
-        nix_conf: |
-          keep-env-derivations = true
-          keep-outputs = true
+    # The SAME installer as CI, and that parity is load-bearing rather than tidiness: the store this
+    # restores below is the one CI built, and CI's installer is multi-user, so those paths are
+    # root-owned and only the daemon writes them. A single-user install (nix-quick-install) runs nix
+    # as the runner and cannot take a write lock in that store -- `nix develop` dies with
+    # `opening lock file ...-source.lock: Permission denied` on a cache hit.
+    - uses: DeterminateSystems/nix-installer-action@main
     # No purge settings, unlike CI: this job reads the store cache CI populates and must not evict it.
     - uses: nix-community/cache-nix-action@v7
       with:

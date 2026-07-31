@@ -48,11 +48,13 @@ jobs:
       # allowed-endpoints AFTER YAML parsing, so a '|' block scalar's newlines would reach the
       # endpoint parser verbatim and break it.
       #
-      # nix-quick-install and python-build-standalone ship as GitHub release assets; the nixpkgs flake
+      # The Nix installer serves itself from install.determinate.systems;
+      # python-build-standalone ships as a GitHub release asset; the nixpkgs flake
       # input arrives as a codeload tarball; cache.nixos.org is the substituter and tarballs.nixos.org
       # its fixed-output mirror. crates.io is jphfmt: it is not in nixpkgs, so a cold store builds it
       # from the crate and its vendored lock. pypi is uv resolving the dev group (camas).
       extra_endpoints: >-
+        install.determinate.systems:443
         release-assets.githubusercontent.com:443
         codeload.github.com:443
         cache.nixos.org:443
