@@ -50,7 +50,9 @@ PyObject * Struct_vectorcall(
 		PyErr_Format(
 			PyExc_TypeError,
 			"%.200s() takes at most %zd positional arguments but %zd were given",
-			struct_type_name(type), type->struct_field_count, positional_count
+			struct_type_name(type),
+			type->struct_field_count,
+			positional_count
 		);
 
 		return NULL;
@@ -66,9 +68,11 @@ PyObject * Struct_vectorcall(
 
 	bind_positional(type, self, arguments, positional_count);
 
-	if (bind_keywords(type, self, arguments, positional_count, keyword_names) != RESULT_OK
-		|| fill_defaults(type, self, positional_count) != RESULT_OK
-		|| run_post_init(type, self) != RESULT_OK) {
+	if (
+		bind_keywords(type, self, arguments, positional_count, keyword_names) != RESULT_OK ||
+		fill_defaults(type, self, positional_count) != RESULT_OK ||
+		run_post_init(type, self) != RESULT_OK
+	) {
 		return NULL;
 	}
 
@@ -121,8 +125,10 @@ static enum result bind_keywords(
 				return RESULT_ERROR;
 			case FIELD_LOOKUP_MISSING:
 				PyErr_Format(
-					PyExc_TypeError, "%.200s() got an unexpected keyword argument '%U'",
-					struct_type_name(type), keyword
+					PyExc_TypeError,
+					"%.200s() got an unexpected keyword argument '%U'",
+					struct_type_name(type),
+					keyword
 				);
 
 				return RESULT_ERROR;
@@ -134,8 +140,10 @@ static enum result bind_keywords(
 
 		if (*slot != NULL || found.index < positional_count) {
 			PyErr_Format(
-				PyExc_TypeError, "%.200s() got multiple values for argument '%U'",
-				struct_type_name(type), keyword
+				PyExc_TypeError,
+				"%.200s() got multiple values for argument '%U'",
+				struct_type_name(type),
+				keyword
 			);
 
 			return RESULT_ERROR;
@@ -165,8 +173,10 @@ static enum result fill_defaults(
 
 		if (i < required_count) {
 			PyErr_Format(
-				PyExc_TypeError, "%.200s() missing required argument '%U'",
-				struct_type_name(type), PyTuple_GET_ITEM(type->struct_field_names, i)
+				PyExc_TypeError,
+				"%.200s() missing required argument '%U'",
+				struct_type_name(type),
+				PyTuple_GET_ITEM(type->struct_field_names, i)
 			);
 
 			return RESULT_ERROR;
@@ -186,7 +196,7 @@ static enum result fill_defaults(
 static struct field_lookup find_field(StructType const * const type, PyObject * const name) {
 	for (Py_ssize_t i = 0; i < type->struct_field_count; ++i) {
 		if (name == PyTuple_GET_ITEM(type->struct_field_names, i)) {
-			return (struct field_lookup) { .tag = FIELD_LOOKUP_FOUND, .index = i };
+			return (struct field_lookup){.tag = FIELD_LOOKUP_FOUND, .index = i};
 		}
 	}
 
@@ -194,15 +204,15 @@ static struct field_lookup find_field(StructType const * const type, PyObject * 
 		int const compared = PyUnicode_Compare(name, PyTuple_GET_ITEM(type->struct_field_names, i));
 
 		if (compared == 0) {
-			return (struct field_lookup) { .tag = FIELD_LOOKUP_FOUND, .index = i };
+			return (struct field_lookup){.tag = FIELD_LOOKUP_FOUND, .index = i};
 		}
 
 		if (compared == -1 && PyErr_Occurred()) {
-			return (struct field_lookup) { .tag = FIELD_LOOKUP_ERROR };
+			return (struct field_lookup){.tag = FIELD_LOOKUP_ERROR};
 		}
 	}
 
-	return (struct field_lookup) { .tag = FIELD_LOOKUP_MISSING };
+	return (struct field_lookup){.tag = FIELD_LOOKUP_MISSING};
 }
 
 #ifdef TESTING

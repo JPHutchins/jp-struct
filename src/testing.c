@@ -71,7 +71,9 @@ PyObject * testing_evaluate(char const * const source) {
 
 	PyObject * const prelude = PyRun_String(
 		"import salix\nfrom salix import Struct, StructMeta\n",
-		Py_file_input, globals, globals
+		Py_file_input,
+		globals,
+		globals
 	);
 
 	if (prelude == NULL) {

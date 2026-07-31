@@ -43,9 +43,7 @@ PyObject * struct_annotations(PyObject * const namespace) {
 static PyObject * borrow_annotate(PyObject * const namespace) {
 	PyObject * const annotate = PyDict_GetItemString(namespace, "__annotate__");
 
-	return annotate != NULL
-		? annotate
-		: PyDict_GetItemString(namespace, "__annotate_func__");
+	return annotate != NULL ? annotate : PyDict_GetItemString(namespace, "__annotate_func__");
 }
 
 static PyObject * evaluate(PyObject * const annotate, enum annotation_format const format) {

@@ -27,8 +27,10 @@ PyObject * Struct_rich_compare(PyObject * const self, PyObject * const other, in
 		Py_RETURN_NOTIMPLEMENTED;
 	}
 
-	return op == Py_EQ || op == Py_NE ? equality_result(self, other, op)
-									  : ordering_result(self, other, op);
+	return (
+		op == Py_EQ || op == Py_NE ? equality_result(self, other, op) :
+		ordering_result(self, other, op)
+	);
 }
 
 static PyObject * equality_result(PyObject * const self, PyObject * const other, int const op) {
@@ -92,9 +94,10 @@ static enum comparison structs_equal(PyObject * const self, PyObject * const oth
 	StructType const * const other_type = struct_type_of(other);
 	enum comparison const named_alike = names_equal(self_type, other_type);
 
-	return named_alike != COMPARISON_EQUAL
-		? named_alike
-		: values_equal(self_type, self, other_type, other);
+	return (
+		named_alike != COMPARISON_EQUAL ? named_alike :
+		values_equal(self_type, self, other_type, other)
+	);
 }
 
 static enum comparison names_equal(
@@ -102,7 +105,9 @@ static enum comparison names_equal(
 	StructType const * const other_type
 ) {
 	return PyObject_RichCompareBool(
-		self_type->struct_field_names, other_type->struct_field_names, Py_EQ
+		self_type->struct_field_names,
+		other_type->struct_field_names,
+		Py_EQ
 	);
 }
 

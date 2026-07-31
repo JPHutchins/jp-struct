@@ -39,11 +39,14 @@ struct field_plan field_plan_build(StructType const * const base, PyObject * con
 	PY_MOVABLE(new_names, PyList_New(0));
 	PY_OWNED(default_by_name, PyDict_New());
 
-	if (all_names != NULL
-		&& new_names != NULL
-		&& default_by_name != NULL
-		&& append_inherited(base, all_names, default_by_name) == RESULT_OK
-		&& append_declared(base, annotations, namespace, all_names, new_names, default_by_name) == RESULT_OK) {
+	if (
+		all_names != NULL &&
+		new_names != NULL &&
+		default_by_name != NULL &&
+		append_inherited(base, all_names, default_by_name) == RESULT_OK &&
+		append_declared(base, annotations, namespace, all_names, new_names, default_by_name) ==
+			RESULT_OK
+	) {
 		plan.defaults = build_defaults(all_names, default_by_name);
 
 		if (plan.defaults != NULL) {
@@ -130,8 +133,10 @@ static enum result append_declared(
 		/* A default is the class-body value bound to the field name. */
 		PyObject * const declared_default = PyDict_GetItem(namespace, field_name);
 
-		if (declared_default != NULL
-			&& PyDict_SetItem(default_by_name, field_name, declared_default) < 0) {
+		if (
+			declared_default != NULL &&
+			PyDict_SetItem(default_by_name, field_name, declared_default) < 0
+		) {
 			return RESULT_ERROR;
 		}
 
@@ -181,7 +186,8 @@ static PyObject * build_defaults(PyObject * const all_names, PyObject * const de
 		} else if (first_default != field_count) {
 			PyErr_Format(
 				PyExc_TypeError,
-				"non-default field '%U' follows a field with a default", field_name
+				"non-default field '%U' follows a field with a default",
+				field_name
 			);
 
 			return NULL;
@@ -236,7 +242,7 @@ static PyObject * defaults_for(char const * const * const names, Py_ssize_t cons
 }
 
 static void test_no_defaults_produces_an_empty_tuple(void) {
-	char const * const names[] = { "a", "b" };
+	char const * const names[] = {"a", "b"};
 	PyObject * const all_names = names_of(names, 2);
 	PyObject * const by_name = defaults_for(names, 0);
 	PyObject * const defaults = build_defaults(all_names, by_name);
@@ -250,8 +256,8 @@ static void test_no_defaults_produces_an_empty_tuple(void) {
 }
 
 static void test_only_the_trailing_run_becomes_defaults(void) {
-	char const * const names[] = { "a", "b", "c" };
-	char const * const defaulted[] = { "b", "c" };
+	char const * const names[] = {"a", "b", "c"};
+	char const * const defaulted[] = {"b", "c"};
 	PyObject * const all_names = names_of(names, 3);
 	PyObject * const by_name = defaults_for(defaulted, 2);
 	PyObject * const defaults = build_defaults(all_names, by_name);
@@ -265,8 +271,8 @@ static void test_only_the_trailing_run_becomes_defaults(void) {
 }
 
 static void test_a_required_field_after_a_default_is_rejected(void) {
-	char const * const names[] = { "a", "b" };
-	char const * const defaulted[] = { "a" };
+	char const * const names[] = {"a", "b"};
+	char const * const defaulted[] = {"a"};
 	PyObject * const all_names = names_of(names, 2);
 	PyObject * const by_name = defaults_for(defaulted, 1);
 	PyObject * const defaults = build_defaults(all_names, by_name);

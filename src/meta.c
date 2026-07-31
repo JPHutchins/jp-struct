@@ -80,7 +80,7 @@ PyTypeObject StructMeta_Type = {
 	PyVarObject_HEAD_INIT(NULL, 0) .tp_name = "salix.StructMeta",
 	.tp_basicsize = sizeof(StructType),
 	.tp_itemsize = sizeof(PyMemberDef),
-	.tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_TYPE_SUBCLASS | Py_TPFLAGS_HAVE_GC | Py_TPFLAGS_HAVE_VECTORCALL | Py_TPFLAGS_BASETYPE,
+	.tp_flags = ( Py_TPFLAGS_DEFAULT | Py_TPFLAGS_TYPE_SUBCLASS | Py_TPFLAGS_HAVE_GC | Py_TPFLAGS_HAVE_VECTORCALL | Py_TPFLAGS_BASETYPE ),
 	.tp_new = StructMeta_new,
 	.tp_dealloc = StructMeta_dealloc,
 	.tp_traverse = StructMeta_traverse,
@@ -169,11 +169,15 @@ PyObject * StructMeta_new(
 			has_weakref_slot(base)
 		)
 	);
-	StructType * struct_class =
-		namespace != NULL ? create_class(metatype, name, bases, namespace) : NULL;
+	StructType * struct_class = (
+		namespace != NULL ? create_class(metatype, name, bases, namespace) :
+		NULL
+	);
 
-	if (struct_class != NULL
-		&& install_fields(struct_class, base, &plan, request.options) != RESULT_OK) {
+	if (
+		struct_class != NULL &&
+		install_fields(struct_class, base, &plan, request.options) != RESULT_OK
+	) {
 		Py_CLEAR(struct_class);
 	}
 
@@ -216,12 +220,14 @@ static PyObject * build_class_namespace(
 	PY_OWNED(slots, build_slots(new_names, options.weakref && !base_has_weakref));
 	PY_MOVABLE(namespace, PyDict_Copy(original_namespace));
 
-	if (slots != NULL
-		&& namespace != NULL
-		&& drop_class_variables(namespace, new_names) == RESULT_OK
-		&& PyDict_SetItemString(namespace, "__slots__", slots) == 0
-		&& set_match_args(namespace, all_names, options.match_args) == RESULT_OK
-		&& apply_options(namespace, options, inherited) == RESULT_OK) {
+	if (
+		slots != NULL &&
+		namespace != NULL &&
+		drop_class_variables(namespace, new_names) == RESULT_OK &&
+		PyDict_SetItemString(namespace, "__slots__", slots) == 0 &&
+		set_match_args(namespace, all_names, options.match_args) == RESULT_OK &&
+		apply_options(namespace, options, inherited) == RESULT_OK
+	) {
 		return py_move(&namespace);
 	}
 
@@ -261,10 +267,14 @@ static enum result set_match_args(
 
 	PY_OWNED(match_args, PyList_AsTuple(all_names));
 
-	return match_args != NULL
-			&& PyDict_SetItemString(namespace, "__match_args__", match_args) == 0
-		? RESULT_OK
-		: RESULT_ERROR;
+	return (
+		match_args != NULL && PyDict_SetItemString(
+			namespace,
+			"__match_args__",
+			match_args
+		) == 0 ? RESULT_OK :
+		RESULT_ERROR
+	);
 }
 
 /*
@@ -287,22 +297,32 @@ static enum result apply_options(
 	 * rebinds only some of them gets the dispatching slot with the other source
 	 * still answering the rest. */
 	static char const * const comparison[] = {
-		"__eq__", "__ne__", "__lt__", "__le__", "__gt__", "__ge__", NULL
+		"__eq__",
+		"__ne__",
+		"__lt__",
+		"__le__",
+		"__gt__",
+		"__ge__",
+		NULL,
 	};
-	static char const * const representation[] = { "__repr__", NULL };
-	static char const * const mutability[] = { "__setattr__", "__delattr__", NULL };
+	static char const * const representation[] = {"__repr__", NULL};
+	static char const * const mutability[] = {"__setattr__", "__delattr__", NULL};
 
 	if (options.eq != inherited.eq && rebind(namespace, comparison, options.eq) != RESULT_OK) {
 		return RESULT_ERROR;
 	}
 
-	if (options.repr != inherited.repr
-		&& rebind(namespace, representation, options.repr) != RESULT_OK) {
+	if (
+		options.repr != inherited.repr &&
+		rebind(namespace, representation, options.repr) != RESULT_OK
+	) {
 		return RESULT_ERROR;
 	}
 
-	if (options.frozen != inherited.frozen
-		&& rebind(namespace, mutability, options.frozen) != RESULT_OK) {
+	if (
+		options.frozen != inherited.frozen &&
+		rebind(namespace, mutability, options.frozen) != RESULT_OK
+	) {
 		return RESULT_ERROR;
 	}
 
@@ -315,8 +335,10 @@ static enum result rebind(
 	char const * const * const names,
 	bool const from_mixin
 ) {
-	PyObject * const source =
-		from_mixin ? (PyObject *) &StructMixin_Type : (PyObject *) &PyBaseObject_Type;
+	PyObject * const source = (
+		from_mixin ? (PyObject *) &StructMixin_Type :
+		(PyObject *) &PyBaseObject_Type
+	);
 
 	for (char const * const * name = names; *name != NULL; ++name) {
 		if (PyDict_GetItemString(namespace, *name) != NULL) {
@@ -346,11 +368,10 @@ static enum result bind_hash(PyObject * const namespace, struct options const op
 	}
 
 	if (options.eq && !options.frozen) {
-		return PyDict_SetItemString(namespace, "__hash__", Py_None) == 0 ? RESULT_OK
-																		 : RESULT_ERROR;
+		return PyDict_SetItemString(namespace, "__hash__", Py_None) == 0 ? RESULT_OK : RESULT_ERROR;
 	}
 
-	static char const * const hash_name[] = { "__hash__", NULL };
+	static char const * const hash_name[] = {"__hash__", NULL};
 
 	return rebind(namespace, hash_name, options.eq);
 }
@@ -361,8 +382,10 @@ static enum result drop_class_variables(PyObject * const namespace, PyObject * c
 	for (Py_ssize_t i = 0; i < PyList_GET_SIZE(new_names); ++i) {
 		PyObject * const field_name = PyList_GET_ITEM(new_names, i);
 
-		if (PyDict_Contains(namespace, field_name) == 1
-			&& PyDict_DelItem(namespace, field_name) < 0) {
+		if (
+			PyDict_Contains(namespace, field_name) == 1 &&
+			PyDict_DelItem(namespace, field_name) < 0
+		) {
 			return RESULT_ERROR;
 		}
 	}
@@ -448,9 +471,10 @@ static PyObject * StructMeta_call(
 	PyObject * const args,
 	PyObject * const keywords
 ) {
-	return ((PyTypeObject *) self)->tp_vectorcall != NULL
-		? PyVectorcall_Call(self, args, keywords)
-		: PyType_Type.tp_call(self, args, keywords);
+	return (
+		((PyTypeObject *) self)->tp_vectorcall != NULL ? PyVectorcall_Call(self, args, keywords) :
+		PyType_Type.tp_call(self, args, keywords)
+	);
 }
 
 /*
@@ -527,13 +551,11 @@ static struct member_lookup find_member(
 ) {
 	for (Py_ssize_t i = 0; i < member_count; ++i) {
 		if (PyUnicode_CompareWithASCIIString(name, members[i].name) == 0) {
-			return (struct member_lookup) {
-				.tag = MEMBER_LOOKUP_FOUND, .offset = members[i].offset
-			};
+			return (struct member_lookup) {.tag = MEMBER_LOOKUP_FOUND, .offset = members[i].offset};
 		}
 	}
 
-	return (struct member_lookup) { .tag = MEMBER_LOOKUP_MISSING };
+	return (struct member_lookup) {.tag = MEMBER_LOOKUP_MISSING};
 }
 
 /* `visit` and `arg` are not free names: Py_VISIT expands to reference both by

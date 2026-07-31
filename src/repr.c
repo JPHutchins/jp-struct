@@ -66,7 +66,9 @@ static PyObject * field_repr(
 	}
 
 	return PyUnicode_FromFormat(
-		"%U=%U", PyTuple_GET_ITEM(type->struct_field_names, index), rendered
+		"%U=%U",
+		PyTuple_GET_ITEM(type->struct_field_names, index),
+		rendered
 	);
 }
 

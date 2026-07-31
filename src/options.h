@@ -30,7 +30,7 @@ struct options_request {
 
 /* Where a class with no struct base starts. */
 static inline struct options options_initial(void) {
-	return (struct options) {
+	return (struct options){
 		.frozen = true,
 		.eq = true,
 		.order = false,
