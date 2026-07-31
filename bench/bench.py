@@ -25,6 +25,7 @@ import sys
 import tempfile
 import timeit
 from collections.abc import Callable
+from importlib.util import find_spec
 from pathlib import Path
 from typing import NamedTuple
 
@@ -49,6 +50,7 @@ class Construct(NamedTuple):
     dep: str | None   # the dependency library to import (None = no dependency)
     header: str
     body: Callable[[int], str]
+    ctor: Callable[[], Callable[[int, int, int], object]]
 
 
 def _struct(i: int) -> str:
@@ -72,18 +74,83 @@ def _record_type(i: int) -> str:
     return f"@record\ndef C{i}(a: int, b: int, c: int) -> None: ...\n"
 
 
+# The import belongs to the constructor and not to the module, so a construct
+# whose dependency is absent costs nothing to skip.
+def _struct_ctor() -> Callable[[int, int, int], object]:
+    from salix import Struct
+
+    class C(Struct):
+        a: int
+        b: int
+        c: int
+    return C
+
+
+def _msgspec_ctor() -> Callable[[int, int, int], object]:
+    import msgspec
+
+    class C(msgspec.Struct):
+        a: int
+        b: int
+        c: int
+    return C
+
+
+def _namedtuple_ctor() -> Callable[[int, int, int], object]:
+    class C(NamedTuple):
+        a: int
+        b: int
+        c: int
+    return C
+
+
+def _dc_frozen_ctor() -> Callable[[int, int, int], object]:
+    from dataclasses import dataclass
+
+    @dataclass(frozen=True, slots=True)
+    class C:
+        a: int
+        b: int
+        c: int
+    return C
+
+
+def _record_type_ctor() -> Callable[[int, int, int], object]:
+    from records import record  # type: ignore[import-untyped]
+
+    # record reads the return annotation and refuses one that is not None,
+    # so this signature is the decorator's requirement, not an oversight.
+    @record  # type: ignore[untyped-decorator]
+    def C(a: int, b: int, c: int):  # type: ignore[no-untyped-def]
+        ...
+    return C  # type: ignore[no-any-return]
+
+
+def _installed(dep: str | None) -> bool:
+    return dep is None or find_spec(dep) is not None
+
+
+# A rival to measure against, not a requirement: record-type carries a
+# python_version>='3.11' marker and is simply absent below that.
 CONSTRUCTS = [
-    Construct("gen_salix", "salix (this project)", "salix",
-              "from salix import Struct", _struct),
-    Construct("gen_msgspec", "msgspec.Struct", "msgspec",
-              "import msgspec", _msgspec),
-    Construct("gen_namedtuple", "typing.NamedTuple", "typing",
-              "from typing import NamedTuple", _namedtuple),
-    Construct("gen_dcfrozen", "dataclass (frozen+slots)", "dataclasses",
-              "from dataclasses import dataclass", _dc_frozen),
-    Construct("gen_recordtype", "record-type (@record)", "records",
-              "from records import record", _record_type),
+    c
+    for c in (
+        Construct("gen_salix", "salix (this project)", "salix",
+                  "from salix import Struct", _struct, _struct_ctor),
+        Construct("gen_msgspec", "msgspec.Struct", "msgspec",
+                  "import msgspec", _msgspec, _msgspec_ctor),
+        Construct("gen_namedtuple", "typing.NamedTuple", "typing",
+                  "from typing import NamedTuple", _namedtuple, _namedtuple_ctor),
+        Construct("gen_dcfrozen", "dataclass (frozen+slots)", "dataclasses",
+                  "from dataclasses import dataclass", _dc_frozen, _dc_frozen_ctor),
+        Construct("gen_recordtype", "record-type (@record)", "records",
+                  "from records import record", _record_type, _record_type_ctor),
+    )
+    if _installed(c.dep)
 ]
+
+# Which rows the closing summary compares, when they survived the filter.
+HEADLINE = ("gen_salix", "gen_namedtuple", "gen_msgspec")
 
 _LINE = re.compile(r"import time:\s+(\d+)\s+\|\s+(\d+)\s+\|\s+(.*)")
 
@@ -120,51 +187,8 @@ def dep_ms(c: Construct, work: Path) -> float:
 
 def build_constructors() -> dict[str, Callable[[int, int, int], object]]:
     """Real in-process 3-field constructors (avoids exec/PEP-649 quirks)."""
-    out: dict[str, Callable[[int, int, int], object]] = {}
 
-    from salix import Struct
-
-    class RC(Struct):
-        a: int
-        b: int
-        c: int
-    out["gen_salix"] = RC
-
-    import msgspec
-
-    class MS(msgspec.Struct):
-        a: int
-        b: int
-        c: int
-    out["gen_msgspec"] = MS
-
-    from typing import NamedTuple
-
-    class NT(NamedTuple):
-        a: int
-        b: int
-        c: int
-    out["gen_namedtuple"] = NT
-
-    from dataclasses import dataclass
-
-    @dataclass(frozen=True, slots=True)
-    class DC:
-        a: int
-        b: int
-        c: int
-    out["gen_dcfrozen"] = DC
-
-    from records import record  # type: ignore[import-untyped]
-
-    # record reads the return annotation and refuses one that is not None,
-    # so this signature is the decorator's requirement, not an oversight.
-    @record  # type: ignore[untyped-decorator]
-    def RT(a: int, b: int, c: int):  # type: ignore[no-untyped-def]
-        ...
-    out["gen_recordtype"] = RT
-
-    return out
+    return {c.key: c.ctor() for c in CONSTRUCTS}
 
 
 def instantiate_ns(ctor: Callable[[int, int, int], object]) -> float:
@@ -176,29 +200,28 @@ def main() -> None:
     print(f"python {sys.version.split()[0]} | K={K} | median of {RUNS} fresh "
           f"interpreters (warm)\n")
     ctors = build_constructors()
-    rows = []
     with tempfile.TemporaryDirectory() as tmp:
         work = Path(tmp)
-        for c in CONSTRUCTS:
-            rows.append((c.label, dep_ms(c, work), per_type_us(c, work),
-                         instantiate_ns(ctors[c.key])))
+        rows = {
+            c.key: (c.label, dep_ms(c, work), per_type_us(c, work),
+                    instantiate_ns(ctors[c.key]))
+            for c in CONSTRUCTS
+        }
 
-    w = max(len(r[0]) for r in rows)
+    w = max(len(r[0]) for r in rows.values())
     print(f"{'construct':<{w}} {'import ms':>10} {'us/type':>9} {'inst ns':>9}")
     print("-" * (w + 31))
-    for label, dep, us, ns in rows:
+    for label, dep, us, ns in rows.values():
         print(f"{label:<{w}} {dep:>10.3f} {us:>9.1f} {ns:>9.1f}")
 
-    salix_row = rows[0]
-    nt = next(r for r in rows if r[0].startswith("typing.NamedTuple"))
-    ms = next(r for r in rows if r[0].startswith("msgspec"))
     print("\nTotal startup to define N struct types = import_ms + N * us/type/1000")
     def total(r: tuple[str, float, float, float], n: int) -> float:
         return r[1] + n * r[2] / 1000
 
+    headline = [(rows[k][0].split()[0], rows[k]) for k in HEADLINE if k in rows]
     for n in (1, 10, 100, 1000):
-        print(f"  N={n:<5}  salix {total(salix_row, n):8.3f} ms   "
-              f"NamedTuple {total(nt, n):8.3f} ms   msgspec {total(ms, n):8.3f} ms")
+        print(f"  N={n:<5}  "
+              + "   ".join(f"{name} {total(row, n):8.3f} ms" for name, row in headline))
 
 
 if __name__ == "__main__":
