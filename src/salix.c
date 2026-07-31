@@ -57,13 +57,13 @@ static PyModuleDef_Slot struct_slots[] = {
 
 static PyModuleDef struct_module = {
 	PyModuleDef_HEAD_INIT,
-	.m_name = "jpstruct",
+	.m_name = "salix",
 	.m_doc = "A minimal C-backed inheritable Struct base class.",
 	.m_size = 0,
 	.m_slots = struct_slots,
 };
 
-PyMODINIT_FUNC PyInit_jpstruct(void) {
+PyMODINIT_FUNC PyInit_salix(void) {
 	return PyModuleDef_Init(&struct_module);
 }
 

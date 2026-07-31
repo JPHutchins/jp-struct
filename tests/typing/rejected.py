@@ -6,7 +6,7 @@ starts accepting one of these. That inversion is the only way to test for a
 diagnostic rather than for its absence.
 """
 
-from jpstruct import Struct
+from salix import Struct
 
 
 class Point(Struct):

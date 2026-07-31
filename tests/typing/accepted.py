@@ -6,7 +6,7 @@ from typing import Literal
 
 from typing_extensions import assert_type
 
-from jpstruct import Struct
+from salix import Struct
 
 
 class Point(Struct):

@@ -14,7 +14,7 @@
 #	include <Python.h>
 #	include <unity.h>
 
-/* Run `source` as a module body with `jpstruct` already imported, and return
+/* Run `source` as a module body with `salix` already imported, and return
  * the value bound to `result`. Aborts the test on any Python error. */
 PyObject * testing_evaluate(char const * source);
 

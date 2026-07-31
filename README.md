@@ -1,10 +1,10 @@
-# jp-struct
+# salix
 
 A C-backed, inheritable `Struct` base class for Python, for programs that pay
 for their imports.
 
 ```python
->>> from jpstruct import Struct
+>>> from salix import Struct
 
 >>> class Point(Struct):
 ...     x: float
@@ -15,7 +15,7 @@ Point(x=1.0, y=2.0)
 
 ```
 
-`jpstruct/__init__.pyi` is the API. `src/jpstruct.c` says what this is and is
+`salix/__init__.pyi` is the API. `src/salix.c` says what this is and is
 not. `tasks.py` is what runs. `uv run camas benchmark` says what it costs.
 
 ## Working in the repo

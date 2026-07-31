@@ -1,4 +1,4 @@
-"""Tests for the `jpstruct` extension.
+"""Tests for the `salix` extension.
 
 Seeded from the prototype's smoke test. Covers the features the annotation
 form supports: construction by position/keyword, defaults, immutability,
@@ -10,8 +10,8 @@ Run with `uv run camas test` (or `python -m pytest`).
 
 import pytest
 
-import jpstruct
-from jpstruct import Struct
+import salix
+from salix import Struct
 
 
 class Point2D(Struct):
@@ -138,11 +138,11 @@ def test_empty_struct():
 
 
 def test_metaclass_identity():
-    assert type(Point2D) is jpstruct.StructMeta
+    assert type(Point2D) is salix.StructMeta
     assert isinstance(Point2D(1.0, 2.0), Struct)
 
 
 def test_module_of_the_exported_names():
-    assert Struct.__module__ == "jpstruct"
-    assert jpstruct.StructMeta.__module__ == "jpstruct"
+    assert Struct.__module__ == "salix"
+    assert salix.StructMeta.__module__ == "salix"
     assert Point2D.__module__ == __name__

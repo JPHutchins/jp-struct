@@ -4,7 +4,7 @@ from hypothesis import given
 from hypothesis import strategies as st
 from values import HASHABLE, Coordinate, Frozen, Inner
 
-from jpstruct import Struct
+from salix import Struct
 
 
 class Pair(Struct):

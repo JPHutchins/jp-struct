@@ -1,5 +1,5 @@
 [project]
-name = "jpstruct-tests"
+name = "salix-tests"
 version = "0"
 requires-python = ">=3.10"
 dependencies = ["pytest>=9", "hypothesis>=6"]

@@ -3,7 +3,7 @@ requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "jp-struct"
+name = "salix"
 version = "0.0.0"
 description = "A C-backed, inheritable Struct base class for Python — fast import, fast type creation"
 readme = "README.md"
@@ -12,18 +12,17 @@ authors = [{ name = "JP Hutchins", email = "jphutchins@gmail.com" }]
 license = "MIT"
 license-files = ["LICENSE"]
 
-# The importable module is `jpstruct` (from jpstruct import Struct); the C source
-# is wired up in setup.py because setuptools does not yet support declaring
-# ext_modules in pyproject.toml.
+# The C source is wired up in setup.py because setuptools does not yet support
+# declaring ext_modules in pyproject.toml.
 
-# jpstruct/ holds no Python: the extension is built as its __init__, and the
+# salix/ holds no Python: the extension is built as its __init__, and the
 # directory exists so that py.typed and the stub have somewhere to live.
 [tool.setuptools]
 py-modules = []
-packages = ["jpstruct"]
+packages = ["salix"]
 
 [tool.setuptools.package-data]
-jpstruct = ["py.typed", "__init__.pyi"]
+salix = ["py.typed", "__init__.pyi"]
 
 [dependency-groups]
 dev = ["setuptools>=77", "camas[mcp]==0.1.29"]
@@ -37,7 +36,7 @@ reportUnnecessaryTypeIgnoreComment = "error"
 
 [tool.uv]
 # uv must never install this project. It is a C extension, and an editable
-# install puts a finder on the path whose `jpstruct` is a namespace package
+# install puts a finder on the path whose `salix` is a namespace package
 # over the repo directory -- which then shadows the wheel in the leg whose
 # whole job is to import an installed one. CI passes --no-install-workspace for
 # the same reason; this is that, for everyone who forgets. The extension comes

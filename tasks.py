@@ -1,4 +1,4 @@
-"""camas task definitions for jp-struct — the single source of truth for local and CI."""
+"""camas task definitions for salix — the single source of truth for local and CI."""
 
 from pathlib import Path
 
@@ -23,7 +23,7 @@ NEWEST = max(PYTHONS, key=lambda python: tuple(map(int, python.split("."))))
 # per-interpreter project environment is what keeps six of them from fighting
 # over the one .venv a workspace otherwise shares.
 PYTEST = (
-    "uv run --package jpstruct-tests --managed-python --python {PY} python -m pytest"
+    "uv run --package salix-tests --managed-python --python {PY} python -m pytest"
 )
 ENVIRONMENT_PER_INTERPRETER = {"UV_PROJECT_ENVIRONMENT": ".venvs/{PY}"}
 
@@ -59,7 +59,7 @@ c_analyzer = Task(
 )
 analyze = Sequential(compile_flags, Parallel(c_tidy, c_analyzer))
 
-# A checker reads jpstruct/__init__.pyi and never imports the extension, so
+# A checker reads salix/__init__.pyi and never imports the extension, so
 # there is nothing to build first. Targeting the floor is the point: that is
 # where the stub has to hold, whatever interpreter the checker itself runs on.
 TYPE_CHECK = "uv run --no-project --with typing_extensions"
@@ -148,14 +148,14 @@ check = Parallel(test, free_threaded, format_check, lint, analyze, c_test, type_
 # leg cannot build this source at all.
 #
 # --no-project rather than the tests member, because this leg must not see the
-# workspace at all: jp-struct is a member of it, and uv resolves the name to the
+# workspace at all: salix is a member of it, and uv resolves the name to the
 # source tree and compiles it instead of taking the wheel. Naming the two
 # dependencies is the cost -- uv run takes neither a pyproject.toml for
 # --with-requirements nor a member whose sources it is told to ignore.
 #
 # cwd, because the repo root is sys.path[0] and an in-place build leaves a
-# jpstruct.<abi>.so sitting there that shadows anything installed. That is what
-# JPSTRUCT_REQUIRE_INSTALLED makes the suite assert rather than assume.
+# salix.<abi>.so sitting there that shadows anything installed. That is what
+# SALIX_REQUIRE_INSTALLED makes the suite assert rather than assume.
 #
 # --no-cache, because the version is permanently 0.0.0: uv keys its cache on
 # name and version, so a rebuilt wheel is indistinguishable from one built
@@ -165,9 +165,9 @@ check = Parallel(test, free_threaded, format_check, lint, analyze, c_test, type_
 wheel_test = Task(
     "uv run --no-cache --no-project --managed-python --python {PY}"
     " --find-links ../result-wheels"
-    " --with jp-struct --with pytest --with hypothesis python -m pytest .",
+    " --with salix --with pytest --with hypothesis python -m pytest .",
     cwd=Path("tests"),
-    env={"JPSTRUCT_REQUIRE_INSTALLED": "1"},
+    env={"SALIX_REQUIRE_INSTALLED": "1"},
 )
 
 # Sampled rather than crossed, to stay inside the OSS concurrency limit.

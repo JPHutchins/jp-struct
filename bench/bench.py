@@ -1,4 +1,4 @@
-"""Benchmark `jpstruct` against the real alternatives.
+"""Benchmark `salix` against the real alternatives.
 
 Methodology mirrors JP Hutchins' python-struct-profiling / importtime_sweep.py
 so the numbers are directly comparable to the interstellar-inclination article:
@@ -31,7 +31,7 @@ from typing import NamedTuple
 K = 200
 RUNS = 5
 
-# The in-tree jpstruct.*.so lives under src/ (or the repo root); make it
+# The in-tree salix.*.so lives under src/ (or the repo root); make it
 # importable here and in every subprocess we spawn (subprocesses inherit
 # PYTHONPATH, not sys.path).
 _ROOT = Path(__file__).resolve().parent.parent
@@ -73,8 +73,8 @@ def _record_type(i: int) -> str:
 
 
 CONSTRUCTS = [
-    Construct("gen_jpstruct", "jpstruct (this project)", "jpstruct",
-              "from jpstruct import Struct", _struct),
+    Construct("gen_salix", "salix (this project)", "salix",
+              "from salix import Struct", _struct),
     Construct("gen_msgspec", "msgspec.Struct", "msgspec",
               "import msgspec", _msgspec),
     Construct("gen_namedtuple", "typing.NamedTuple", "typing",
@@ -122,13 +122,13 @@ def build_constructors() -> dict[str, Callable[[int, int, int], object]]:
     """Real in-process 3-field constructors (avoids exec/PEP-649 quirks)."""
     out: dict[str, Callable[[int, int, int], object]] = {}
 
-    from jpstruct import Struct
+    from salix import Struct
 
     class RC(Struct):
         a: int
         b: int
         c: int
-    out["gen_jpstruct"] = RC
+    out["gen_salix"] = RC
 
     import msgspec
 
@@ -189,7 +189,7 @@ def main() -> None:
     for label, dep, us, ns in rows:
         print(f"{label:<{w}} {dep:>10.3f} {us:>9.1f} {ns:>9.1f}")
 
-    jpstruct_row = rows[0]
+    salix_row = rows[0]
     nt = next(r for r in rows if r[0].startswith("typing.NamedTuple"))
     ms = next(r for r in rows if r[0].startswith("msgspec"))
     print("\nTotal startup to define N struct types = import_ms + N * us/type/1000")
@@ -197,7 +197,7 @@ def main() -> None:
         return r[1] + n * r[2] / 1000
 
     for n in (1, 10, 100, 1000):
-        print(f"  N={n:<5}  jpstruct {total(jpstruct_row, n):8.3f} ms   "
+        print(f"  N={n:<5}  salix {total(salix_row, n):8.3f} ms   "
               f"NamedTuple {total(nt, n):8.3f} ms   msgspec {total(ms, n):8.3f} ms")
 
 

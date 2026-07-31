@@ -11,7 +11,7 @@ import weakref
 import pytest
 from values import EVERY, HASHABLE, identify
 
-from jpstruct import Struct
+from salix import Struct
 
 
 class Plain(Struct):

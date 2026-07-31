@@ -9,7 +9,7 @@ mutable struct or stop rejecting them on a frozen one.
 import pytest
 from values import EVERY, identify
 
-from jpstruct import Struct
+from salix import Struct
 
 
 class Frozen(Struct):

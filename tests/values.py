@@ -12,7 +12,7 @@ import enum
 import fractions
 import typing
 
-from jpstruct import Struct
+from salix import Struct
 
 
 class Colour(enum.Enum):

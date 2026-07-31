@@ -19,7 +19,7 @@ let
   ]);
 in
 stdenv.mkDerivation {
-  pname = "jp-struct-sdist";
+  pname = "salix-sdist";
   version = (lib.importTOML (src + "/pyproject.toml")).project.version;
   inherit src;
 

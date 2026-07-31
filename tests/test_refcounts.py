@@ -12,7 +12,7 @@ import sysconfig
 
 import pytest
 
-from jpstruct import Struct
+from salix import Struct
 
 pytestmark = pytest.mark.skipif(
     bool(sysconfig.get_config_var("Py_GIL_DISABLED")),

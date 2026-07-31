@@ -8,7 +8,7 @@ those three are exactly where an assumption about the type would bite.
 import pytest
 from values import EVERY, HASHABLE, UNHASHABLE, Inner, Outer, identify
 
-from jpstruct import Struct
+from salix import Struct
 
 
 class Pair(Struct):

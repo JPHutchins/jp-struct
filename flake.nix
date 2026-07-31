@@ -1,5 +1,5 @@
 {
-  description = "jp-struct — a C-backed, inheritable Struct base class for Python";
+  description = "salix — a C-backed, inheritable Struct base class for Python";
 
   inputs.nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
 
@@ -50,7 +50,7 @@
         root = ./.;
         fileset = lib.fileset.unions [
           ./src
-          ./jpstruct
+          ./salix
           ./build_config.py
           ./setup.py
           ./pyproject.toml
@@ -98,7 +98,7 @@
           );
 
           all = pkgs.symlinkJoin {
-            name = "jp-struct-wheels";
+            name = "salix-wheels";
             paths = lib.attrValues wheels;
           };
 
@@ -113,7 +113,7 @@
           # What a release uploads: every wheel and the one sdist, in the shape
           # `twine upload` wants.
           release = pkgs.symlinkJoin {
-            name = "jp-struct-release";
+            name = "salix-release";
             paths = lib.attrValues wheels ++ [ sdist ];
           };
         in
@@ -243,7 +243,7 @@
                 pip install --no-index --no-deps --target=site \
                   ${forSystem.${system}.wheels."3.14-manylinux-x86_64"}/*.whl
                 export PYTHONPATH=$PWD/site
-                export JPSTRUCT_REQUIRE_INSTALLED=1
+                export SALIX_REQUIRE_INSTALLED=1
                 python -m pytest -q -p no:cacheprovider ${./tests}
                 touch $out
               '';

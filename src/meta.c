@@ -77,7 +77,7 @@ static struct member_lookup find_member(
 );
 
 PyTypeObject StructMeta_Type = {
-	PyVarObject_HEAD_INIT(NULL, 0) .tp_name = "jpstruct.StructMeta",
+	PyVarObject_HEAD_INIT(NULL, 0) .tp_name = "salix.StructMeta",
 	.tp_basicsize = sizeof(StructType),
 	.tp_itemsize = sizeof(PyMemberDef),
 	.tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_TYPE_SUBCLASS | Py_TPFLAGS_HAVE_GC | Py_TPFLAGS_HAVE_VECTORCALL | Py_TPFLAGS_BASETYPE,

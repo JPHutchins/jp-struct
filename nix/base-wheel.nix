@@ -19,7 +19,7 @@ let
   ]);
 in
 stdenv.mkDerivation {
-  pname = "jp-struct-base-wheel";
+  pname = "salix-base-wheel";
   version = (lib.importTOML (src + "/pyproject.toml")).project.version;
   inherit src;
 

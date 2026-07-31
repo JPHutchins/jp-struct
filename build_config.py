@@ -14,7 +14,7 @@ class BuildConfig(NamedTuple):
 
 BUILD: Final = BuildConfig(
     sources=(
-        "src/jpstruct.c",
+        "src/salix.c",
         "src/annotations.c",
         "src/compare.c",
         "src/construct.c",

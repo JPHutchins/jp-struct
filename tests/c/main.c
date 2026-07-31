@@ -1,6 +1,6 @@
 /*
  * Runner for the in-file tests. The module is registered before the
- * interpreter starts so a test can `import jpstruct` and get this build rather
+ * interpreter starts so a test can `import salix` and get this build rather
  * than whatever is installed.
  */
 #include <Python.h>
@@ -8,7 +8,7 @@
 
 #include "../../src/testing.h"
 
-PyMODINIT_FUNC PyInit_jpstruct(void);
+PyMODINIT_FUNC PyInit_salix(void);
 
 void setUp(void) {}
 
@@ -21,7 +21,7 @@ void tearDown(void) {
 }
 
 int main(void) {
-	if (PyImport_AppendInittab("jpstruct", PyInit_jpstruct) < 0) {
+	if (PyImport_AppendInittab("salix", PyInit_salix) < 0) {
 		return 1;
 	}
 

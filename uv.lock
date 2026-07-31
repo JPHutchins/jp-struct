@@ -11,10 +11,10 @@ resolution-markers = [
 
 [manifest]
 members = [
-    "jp-struct",
-    "jpstruct-bench",
-    "jpstruct-tests",
-    "jpstruct-tools",
+    "salix",
+    "salix-bench",
+    "salix-tests",
+    "salix-tools",
 ]
 
 [[package]]
@@ -440,7 +440,7 @@ wheels = [
 ]
 
 [[package]]
-name = "jp-struct"
+name = "salix"
 version = "0.0.0"
 source = { virtual = "." }
 
@@ -459,7 +459,7 @@ dev = [
 ]
 
 [[package]]
-name = "jpstruct-bench"
+name = "salix-bench"
 version = "0"
 source = { virtual = "bench" }
 dependencies = [
@@ -474,7 +474,7 @@ requires-dist = [
 ]
 
 [[package]]
-name = "jpstruct-tests"
+name = "salix-tests"
 version = "0"
 source = { virtual = "tests" }
 dependencies = [
@@ -489,7 +489,7 @@ requires-dist = [
 ]
 
 [[package]]
-name = "jpstruct-tools"
+name = "salix-tools"
 version = "0"
 source = { virtual = "tools" }
 

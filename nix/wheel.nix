@@ -39,7 +39,7 @@ let
   };
 in
 stdenvNoCC.mkDerivation {
-  pname = "jp-struct-wheel-${pythonMinor}-${platformName}";
+  pname = "salix-wheel-${pythonMinor}-${platformName}";
   inherit version src;
 
   nativeBuildInputs = [
@@ -80,8 +80,8 @@ stdenvNoCC.mkDerivation {
     wheel unpack --dest "$NIX_BUILD_TOP/unpacked" ${baseWheel}/*.whl
     unpacked=("$NIX_BUILD_TOP"/unpacked/*/)
 
-    rm "''${unpacked[0]}"/jpstruct/__init__.*.so
-    cp "$NIX_BUILD_TOP/${moduleName}" "''${unpacked[0]}/jpstruct/${moduleName}"
+    rm "''${unpacked[0]}"/salix/__init__.*.so
+    cp "$NIX_BUILD_TOP/${moduleName}" "''${unpacked[0]}/salix/${moduleName}"
 
     mkdir -p "$out"
     wheel pack --dest-dir "$out" "''${unpacked[0]}"
@@ -95,8 +95,8 @@ stdenvNoCC.mkDerivation {
   '';
 
   meta = {
-    description = "jp-struct wheel for CPython ${pythonMinor} on ${platformName}";
-    homepage = "https://github.com/JPHutchins/jp-struct";
+    description = "salix wheel for CPython ${pythonMinor} on ${platformName}";
+    homepage = "https://github.com/JPHutchins/salix";
     platforms = lib.platforms.all;
   };
 }

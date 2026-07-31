@@ -12,7 +12,7 @@
 }:
 
 stdenv.mkDerivation {
-  pname = "jp-struct-c-tests";
+  pname = "salix-c-tests";
   version = "0.0.0";
   inherit src;
 

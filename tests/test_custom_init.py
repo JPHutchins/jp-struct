@@ -11,7 +11,7 @@ import sys
 
 import pytest
 
-from jpstruct import Struct
+from salix import Struct
 
 
 class Generated(Struct):

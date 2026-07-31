@@ -104,7 +104,7 @@ PLATFORMS: dict[str, Platform] = {
 
 
 def fetch(url: str) -> dict[str, Any]:
-    request = urllib.request.Request(url, headers={"User-Agent": "jp-struct-update-targets"})
+    request = urllib.request.Request(url, headers={"User-Agent": "salix-update-targets"})
 
     with urllib.request.urlopen(request) as response:
         loaded: dict[str, Any] = json.load(response)

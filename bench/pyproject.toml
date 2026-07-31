@@ -1,5 +1,5 @@
 [project]
-name = "jpstruct-bench"
+name = "salix-bench"
 version = "0"
 requires-python = ">=3.10"
 
