@@ -440,60 +440,6 @@ wheels = [
 ]
 
 [[package]]
-name = "salix"
-version = "0.0.0"
-source = { virtual = "." }
-
-[package.dev-dependencies]
-dev = [
-    { name = "camas", extra = ["mcp"] },
-    { name = "setuptools" },
-]
-
-[package.metadata]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "camas", extras = ["mcp"], specifier = "==0.1.29" },
-    { name = "setuptools", specifier = ">=77" },
-]
-
-[[package]]
-name = "salix-bench"
-version = "0"
-source = { virtual = "bench" }
-dependencies = [
-    { name = "msgspec" },
-    { name = "record-type", marker = "python_full_version >= '3.11'" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "msgspec", specifier = ">=0.21" },
-    { name = "record-type", marker = "python_full_version >= '3.11'", specifier = ">=2023.1.post1" },
-]
-
-[[package]]
-name = "salix-tests"
-version = "0"
-source = { virtual = "tests" }
-dependencies = [
-    { name = "hypothesis" },
-    { name = "pytest" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "hypothesis", specifier = ">=6" },
-    { name = "pytest", specifier = ">=9" },
-]
-
-[[package]]
-name = "salix-tools"
-version = "0"
-source = { virtual = "tools" }
-
-[[package]]
 name = "jsonschema"
 version = "4.26.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1138,6 +1084,62 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/f6/40/02355f0e134f783a8f9814c4680a1bd311d37671577a5964ea838573ff37/rpds_py-2026.6.3-pp311-pypy311_pp73-musllinux_1_2_i686.whl", hash = "sha256:ca6546b66be9dc4738b1b043d5ebd5488c66c578c5ff0fd0e8065313fe3afb76", size = 623138, upload-time = "2026-06-30T07:17:49.355Z" },
     { url = "https://files.pythonhosted.org/packages/10/85/48f0abdcef5cce4e034c7a5b0ceeceba0b01bf0d942824f4bb720afe2dec/rpds_py-2026.6.3-pp311-pypy311_pp73-musllinux_1_2_x86_64.whl", hash = "sha256:8e65860d238379ed982fd9ba690579b5e95af2f4840f99c772816dbe573cb826", size = 586486, upload-time = "2026-06-30T07:17:51.141Z" },
 ]
+
+[[package]]
+name = "salix"
+version = "0.0.0"
+source = { virtual = "." }
+
+[package.dev-dependencies]
+dev = [
+    { name = "camas", extra = ["mcp"] },
+    { name = "setuptools" },
+]
+
+[package.metadata]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "camas", extras = ["mcp"], specifier = "==0.1.29" },
+    { name = "setuptools", specifier = ">=77" },
+]
+
+[[package]]
+name = "salix-bench"
+version = "0"
+source = { virtual = "bench" }
+dependencies = [
+    { name = "msgspec" },
+    { name = "record-type", marker = "python_full_version >= '3.11'" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "msgspec", specifier = ">=0.21" },
+    { name = "record-type", marker = "python_full_version >= '3.11'", specifier = ">=2023.1.post1" },
+]
+
+[[package]]
+name = "salix-tests"
+version = "0"
+source = { virtual = "tests" }
+dependencies = [
+    { name = "hypothesis" },
+    { name = "packaging" },
+    { name = "pytest" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "hypothesis", specifier = ">=6" },
+    { name = "packaging", specifier = ">=24" },
+    { name = "pytest", specifier = ">=9" },
+]
+
+[[package]]
+name = "salix-tools"
+version = "0"
+source = { virtual = "tools" }
 
 [[package]]
 name = "setuptools"

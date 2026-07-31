@@ -48,7 +48,9 @@ def main() -> None:
         )
 
     if tag != f"v{declared}":
-        raise SystemExit(f"tag {tag} names something other than v{declared}")
+        raise SystemExit(
+            f"tag {tag} names {tag.removeprefix('v')}, but pyproject.toml declares {declared}"
+        )
 
     print(f"{tag} matches the declared version {declared}")
 

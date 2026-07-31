@@ -20,6 +20,11 @@ jobs:
   # this is what keeps the runner count down.
   wheels:
     runs-on: ubuntu-latest
+    # cache-nix-action purges here, and deleting a cache is a REST call the
+    # workflow-level `contents: read` would leave without a scope.
+    permissions:
+      contents: read
+      actions: write
     outputs:
       coverage: ${{ steps.emit.outputs.matrix }}
     steps:

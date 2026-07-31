@@ -7,8 +7,10 @@ on:
   push:
     tags: ["v*"]
 
-# Two tags are two refs, so grouping by ref would let both publish at once.
-# Never cancelled: a half-finished upload is the state worth avoiding.
+# Two tags are two refs, so grouping by ref would let both publish at once. A
+# running release is never cancelled -- a half-finished upload is the state
+# worth avoiding -- but GitHub holds only one run pending per group, so a third
+# tag pushed while one waits replaces it.
 concurrency:
   group: ${{ github.workflow }}
   cancel-in-progress: false
