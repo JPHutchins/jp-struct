@@ -3,16 +3,16 @@
 #include "annotations.h"
 #include "owned.h"
 
-/* annotationlib.Format.FORWARDREF: never raises NameError on an unresolved
- * bare forward reference, which is all we need since we only read the field
- * *names* and *order* here. */
+/* annotationlib.Format. The numbering is the API. */
 enum annotation_format {
 	ANNOTATION_FORMAT_VALUE = 1,
-	ANNOTATION_FORMAT_FORWARDREF = 2,
+	ANNOTATION_FORMAT_VALUE_WITH_FAKE_GLOBALS = 2,
+	ANNOTATION_FORMAT_FORWARDREF = 3,
+	ANNOTATION_FORMAT_STRING = 4,
 };
 
 static PyObject * borrow_annotate(PyObject * namespace);
-static PyObject * evaluate(PyObject * annotate, enum annotation_format format);
+static PyObject * evaluate(PyObject * annotate);
 
 PyObject * struct_annotations(PyObject * const namespace) {
 	PyObject * const declared = PyDict_GetItemString(namespace, "__annotations__");
@@ -27,16 +27,7 @@ PyObject * struct_annotations(PyObject * const namespace) {
 		return PyDict_New();
 	}
 
-	PyObject * const forwardref = evaluate(annotate, ANNOTATION_FORMAT_FORWARDREF);
-
-	if (forwardref != NULL) {
-		return forwardref;
-	}
-
-	/* Fall back to VALUE format if FORWARDREF is unsupported. */
-	PyErr_Clear();
-
-	return evaluate(annotate, ANNOTATION_FORMAT_VALUE);
+	return evaluate(annotate);
 }
 
 /* Borrowed, or NULL when the class body declared no annotations at all. */
@@ -46,12 +37,31 @@ static PyObject * borrow_annotate(PyObject * const namespace) {
 	return annotate != NULL ? annotate : PyDict_GetItemString(namespace, "__annotate_func__");
 }
 
-static PyObject * evaluate(PyObject * const annotate, enum annotation_format const format) {
-	PY_OWNED(argument, PyLong_FromLong(format));
+/* annotationlib.Format.FORWARDREF: never raises NameError on an unresolved
+ * bare forward reference, which is all we need since we only read the field
+ * *names* and *order* here. Only annotationlib can deliver it -- a generated
+ * __annotate__ implements VALUE and answers NotImplementedError to the rest --
+ * so the call goes through the helper rather than the function itself. */
+static PyObject * evaluate(PyObject * const annotate) {
+	PY_OWNED(annotationlib, PyImport_ImportModule("annotationlib"));
 
-	if (argument == NULL) {
+	if (annotationlib != NULL) {
+		return PyObject_CallMethod(
+			annotationlib,
+			"call_annotate_function",
+			"Oi",
+			annotate,
+			ANNOTATION_FORMAT_FORWARDREF
+		);
+	}
+
+	if (!PyErr_ExceptionMatches(PyExc_ImportError)) {
 		return NULL;
 	}
 
-	return PyObject_CallOneArg(annotate, argument);
+	/* No annotationlib means no PEP 649, so this __annotate__ is one the class
+	 * body wrote by hand and a direct call is the only way to reach it. */
+	PyErr_Clear();
+
+	return PyObject_CallFunction(annotate, "i", ANNOTATION_FORMAT_VALUE);
 }
