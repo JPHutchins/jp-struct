@@ -18,6 +18,10 @@ enum : Py_hash_t {
  * a Python frame, so the interpreter's own depth limit never sees the descent.
  */
 Py_hash_t Struct_hash(PyObject * const self) {
+	if (!is_struct(self)) {
+		return PyBaseObject_Type.tp_hash(self);
+	}
+
 	StructType const * const type = struct_type_of(self);
 	PY_OWNED(values, PyTuple_New(type->struct_field_count));
 

@@ -1,7 +1,6 @@
 #include <Python.h>
 
 #include "compare.h"
-#include "mixin.h"
 #include "owned.h"
 #include "types.h"
 
@@ -24,7 +23,7 @@ static enum comparison values_equal(
 );
 
 PyObject * Struct_rich_compare(PyObject * const self, PyObject * const other, int const op) {
-	if (!PyObject_TypeCheck(other, &StructMixin_Type)) {
+	if (!is_struct(self) || !is_struct(other)) {
 		Py_RETURN_NOTIMPLEMENTED;
 	}
 

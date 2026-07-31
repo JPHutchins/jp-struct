@@ -26,6 +26,7 @@ static int StructMeta_traverse(PyObject * self, visitproc visit, void * arg);
 static int StructMeta_clear(PyObject * self);
 static void StructMeta_dealloc(PyObject * self);
 
+static bool inherits_mixin(PyObject * bases);
 static StructType * find_struct_base(PyObject * bases);
 static bool has_weakref_slot(StructType const * base);
 static struct options base_options(StructType const * base);
@@ -161,6 +162,16 @@ PyObject * StructMeta_new(
 		return NULL;
 	}
 
+	if (!inherits_mixin(bases)) {
+		PyErr_SetString(
+			PyExc_TypeError,
+			"a struct class inherits salix.Struct; StructMeta is the metaclass of "
+			"one, not a way to make one"
+		);
+
+		return NULL;
+	}
+
 	StructType const * const base = find_struct_base(bases);
 	struct options const inherited = base_options(base);
 	struct options_request const request =
@@ -220,6 +231,25 @@ PyObject * StructMeta_new(
 	field_plan_clear(&plan);
 
 	return (PyObject *) struct_class;
+}
+
+/*
+ * Everything a struct does comes from _StructMixin: the comparison and repr
+ * bindings, the hash, the setattr that makes frozen mean something. Without it
+ * in the MRO the class still builds, still constructs and still reports its
+ * fields, and is a struct in every visible way except behaviour -- so a bare
+ * `metaclass=StructMeta` is refused rather than answered with that.
+ */
+static bool inherits_mixin(PyObject * const bases) {
+	for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(bases); ++i) {
+		PyObject * const base = PyTuple_GET_ITEM(bases, i);
+
+		if (PyType_Check(base) && PyType_IsSubtype((PyTypeObject *) base, &StructMixin_Type)) {
+			return true;
+		}
+	}
+
+	return false;
 }
 
 /* Find the (single) struct base among ``bases``. A fieldless one still carries
@@ -471,7 +501,27 @@ static StructType * create_class(
 		return NULL;
 	}
 
-	return (StructType *) PyType_Type.tp_new(metatype, type_args, NULL);
+	PY_MOVABLE(created, PyType_Type.tp_new(metatype, type_args, NULL));
+
+	if (created == NULL) {
+		return NULL;
+	}
+
+	/* type_new hands off to the winning metatype's tp_new when that is not the
+	 * one it was given, so a StructMeta subclass overriding __new__ decides what
+	 * comes back here -- and install_fields writes StructType storage into it. */
+	if (!is_struct_class(created)) {
+		PyErr_Format(
+			PyExc_TypeError,
+			"%.200s.__new__ returned %.200s, which is not a struct class",
+			metatype->tp_name,
+			Py_TYPE(created)->tp_name
+		);
+
+		return NULL;
+	}
+
+	return (StructType *) py_move(&created);
 }
 
 /* The type exists but is not yet a struct; this is what makes it one. */

@@ -1,7 +1,6 @@
 #include <Python.h>
 
 #include "construct.h"
-#include "meta.h"
 #include "owned.h"
 #include "result.h"
 #include "types.h"
@@ -219,7 +218,7 @@ PyObject * Struct_set_field(PyObject * const module, PyObject * const arguments)
 		return NULL;
 	}
 
-	if (!PyObject_TypeCheck((PyObject *) Py_TYPE(self), &StructMeta_Type)) {
+	if (!is_struct(self)) {
 		PyErr_Format(
 			PyExc_TypeError,
 			"set_field() expects a struct, not %.200s",

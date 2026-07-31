@@ -12,6 +12,10 @@ static PyObject * field_repr(StructType const * type, PyObject * self, Py_ssize_
  * that contains itself renders as `...` instead of recursing forever.
  */
 PyObject * Struct_repr(PyObject * const self) {
+	if (!is_struct(self)) {
+		return PyBaseObject_Type.tp_repr(self);
+	}
+
 	int const recursive = Py_ReprEnter(self);
 
 	if (recursive != 0) {
