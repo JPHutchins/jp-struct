@@ -87,3 +87,23 @@ def set_field_will_not_take_a_non_struct() -> None:
 
 def set_field_will_not_take_a_name_that_is_not_a_string() -> None:
     set_field(Point(1, "two"), 5, 9)  # type: ignore[arg-type]
+
+
+def set_field_will_not_take_keywords() -> None:
+    set_field(instance=Point(1, "two"), name="x", value=9)  # type: ignore[call-arg]
+
+
+def the_field_names_may_not_be_assigned_on_the_class() -> None:
+    Point.__struct_fields__ = ("z",)  # type: ignore[misc]
+
+
+def the_defaults_may_not_be_assigned_on_the_class() -> None:
+    Point.__struct_defaults__ = (9,)  # type: ignore[misc]
+
+
+def the_field_names_may_not_be_assigned_on_an_instance() -> None:
+    Point(1, "two").__struct_fields__ = ("z",)  # type: ignore[misc]
+
+
+def the_defaults_may_not_be_assigned_on_an_instance() -> None:
+    Point(1, "two").__struct_defaults__ = (9,)  # type: ignore[misc]

@@ -1,15 +1,15 @@
-from typing import Any
+from typing import Any, Final
 
 from typing_extensions import dataclass_transform
 
 class StructMeta(type):
-    __struct_fields__: tuple[str, ...]
-    __struct_defaults__: tuple[Any, ...]
+    __struct_fields__: Final[tuple[str, ...]]
+    __struct_defaults__: Final[tuple[Any, ...]]
 
 @dataclass_transform(frozen_default=True)
 class Struct(metaclass=StructMeta):
-    __struct_fields__: tuple[str, ...]
-    __struct_defaults__: tuple[Any, ...]
+    __struct_fields__: Final[tuple[str, ...]]
+    __struct_defaults__: Final[tuple[Any, ...]]
     def __init_subclass__(
         cls,
         *,
@@ -21,4 +21,4 @@ class Struct(metaclass=StructMeta):
         weakref: bool = False,
     ) -> None: ...
 
-def set_field(instance: Struct, name: str, value: object) -> None: ...
+def set_field(instance: Struct, name: str, value: object, /) -> None: ...
