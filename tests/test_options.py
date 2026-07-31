@@ -103,6 +103,18 @@ class TestEq:
         assert Child(1) == Child(1)
         assert hash(Child(1)) == hash((1, 0))
 
+    def test_a_body_eq_clears_the_hash_the_way_python_does(self):
+        class Custom(Struct):  # noqa: PLW1641 -- the absent __hash__ is the assertion
+            x: object
+
+            def __eq__(self, other: object) -> bool:
+                return True
+
+        assert Custom.__hash__ is None
+
+        with pytest.raises(TypeError, match="unhashable"):
+            hash(Custom(1))
+
     def test_a_body_definition_wins_over_the_option(self):
         class Custom(Struct, eq=False):
             x: object

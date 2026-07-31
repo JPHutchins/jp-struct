@@ -44,8 +44,8 @@ static enum result apply_options(
 	struct options inherited
 );
 static enum result rebind(PyObject * namespace, char const * const * names, bool from_mixin);
-static enum result bind_hash(PyObject * namespace, struct options options);
-static enum result drop_class_variables(PyObject * namespace, PyObject * new_names);
+static enum result bind_hash(PyObject * namespace, struct options options, bool body_defines_eq);
+static enum result drop_class_variables(PyObject * namespace, PyObject * all_names);
 static StructType * create_class(
 	PyTypeObject * metatype,
 	PyObject * name,
@@ -231,7 +231,7 @@ static PyObject * build_class_namespace(
 	if (
 		slots != NULL &&
 		namespace != NULL &&
-		drop_class_variables(namespace, new_names) == RESULT_OK &&
+		drop_class_variables(namespace, all_names) == RESULT_OK &&
 		PyDict_SetItemString(namespace, "__slots__", slots) == 0 &&
 		set_match_args(namespace, all_names, options.match_args) == RESULT_OK &&
 		apply_options(namespace, options, inherited) == RESULT_OK
@@ -301,6 +301,10 @@ static enum result apply_options(
 	struct options const options,
 	struct options const inherited
 ) {
+	/* Read before the rebinds below: afterwards every comparison name is
+	 * present whether the body wrote one or salix did. */
+	bool const body_defines_eq = PyDict_GetItemString(namespace, "__eq__") != NULL;
+
 	/* All six, not just __eq__: they share tp_richcompare, and a class that
 	 * rebinds only some of them gets the dispatching slot with the other source
 	 * still answering the rest. */
@@ -334,7 +338,7 @@ static enum result apply_options(
 		return RESULT_ERROR;
 	}
 
-	return bind_hash(namespace, options);
+	return bind_hash(namespace, options, body_defines_eq);
 }
 
 /* A name the class body defined is neither source's to take. */
@@ -370,12 +374,17 @@ static enum result rebind(
  * can still move -- a key whose hash moves is not a key. Settled outright
  * rather than on a transition, because it is the one name two options answer.
  */
-static enum result bind_hash(PyObject * const namespace, struct options const options) {
+static enum result bind_hash(
+	PyObject * const namespace,
+	struct options const options,
+	bool const body_defines_eq
+) {
 	if (PyDict_GetItemString(namespace, "__hash__") != NULL) {
 		return RESULT_OK;
 	}
 
-	if (options.eq && !options.frozen) {
+	/* Python's rule: a body that defines __eq__ and not __hash__ is unhashable. */
+	if (body_defines_eq || (options.eq && !options.frozen)) {
 		return PyDict_SetItemString(namespace, "__hash__", Py_None) == 0 ? RESULT_OK : RESULT_ERROR;
 	}
 
@@ -386,14 +395,12 @@ static enum result bind_hash(PyObject * const namespace, struct options const op
 
 /* A field with a default is bound in the class body, where it would collide
  * with the __slots__ descriptor of the same name. */
-static enum result drop_class_variables(PyObject * const namespace, PyObject * const new_names) {
-	for (Py_ssize_t i = 0; i < PyList_GET_SIZE(new_names); ++i) {
-		PyObject * const field_name = PyList_GET_ITEM(new_names, i);
+static enum result drop_class_variables(PyObject * const namespace, PyObject * const all_names) {
+	for (Py_ssize_t i = 0; i < PyList_GET_SIZE(all_names); ++i) {
+		PyObject * const field_name = PyList_GET_ITEM(all_names, i);
+		int const present = PyDict_Contains(namespace, field_name);
 
-		if (
-			PyDict_Contains(namespace, field_name) == 1 &&
-			PyDict_DelItem(namespace, field_name) < 0
-		) {
+		if (present < 0 || (present == 1 && PyDict_DelItem(namespace, field_name) < 0)) {
 			return RESULT_ERROR;
 		}
 	}
