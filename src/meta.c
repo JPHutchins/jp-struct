@@ -77,10 +77,17 @@ static struct member_lookup find_member(
 );
 
 PyTypeObject StructMeta_Type = {
-	PyVarObject_HEAD_INIT(NULL, 0) .tp_name = "salix.StructMeta",
+	PyVarObject_HEAD_INIT(NULL, 0)
+	.tp_name = "salix.StructMeta",
 	.tp_basicsize = sizeof(StructType),
 	.tp_itemsize = sizeof(PyMemberDef),
-	.tp_flags = ( Py_TPFLAGS_DEFAULT | Py_TPFLAGS_TYPE_SUBCLASS | Py_TPFLAGS_HAVE_GC | Py_TPFLAGS_HAVE_VECTORCALL | Py_TPFLAGS_BASETYPE ),
+	.tp_flags = (
+		Py_TPFLAGS_DEFAULT |
+		Py_TPFLAGS_TYPE_SUBCLASS |
+		Py_TPFLAGS_HAVE_GC |
+		Py_TPFLAGS_HAVE_VECTORCALL |
+		Py_TPFLAGS_BASETYPE
+	),
 	.tp_new = StructMeta_new,
 	.tp_dealloc = StructMeta_dealloc,
 	.tp_traverse = StructMeta_traverse,
@@ -551,11 +558,11 @@ static struct member_lookup find_member(
 ) {
 	for (Py_ssize_t i = 0; i < member_count; ++i) {
 		if (PyUnicode_CompareWithASCIIString(name, members[i].name) == 0) {
-			return (struct member_lookup) {.tag = MEMBER_LOOKUP_FOUND, .offset = members[i].offset};
+			return (struct member_lookup){.tag = MEMBER_LOOKUP_FOUND, .offset = members[i].offset};
 		}
 	}
 
-	return (struct member_lookup) {.tag = MEMBER_LOOKUP_MISSING};
+	return (struct member_lookup){.tag = MEMBER_LOOKUP_MISSING};
 }
 
 /* `visit` and `arg` are not free names: Py_VISIT expands to reference both by

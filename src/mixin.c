@@ -13,7 +13,8 @@ static PyObject * Struct_get_defaults(PyObject * self, void * closure);
 static PyGetSetDef Struct_getset[];
 
 PyTypeObject StructMixin_Type = {
-	PyVarObject_HEAD_INIT(NULL, 0) .tp_name = "salix._StructMixin",
+	PyVarObject_HEAD_INIT(NULL, 0)
+	.tp_name = "salix._StructMixin",
 	.tp_basicsize = sizeof(PyObject),
 	.tp_flags = Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE,
 	.tp_setattro = Struct_set_attribute,
