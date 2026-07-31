@@ -14,8 +14,8 @@ runs:
     # as the runner and cannot take a write lock in that store -- `nix develop` dies with
     # `opening lock file ...-source.lock: Permission denied` on a cache hit.
     #
-    # Pinned by digest, not the @main CI takes: this step runs in the job that holds the model key,
-    # so what it installs has to be a thing that cannot change under us.
+    # Pinned by digest, and CI now pins the same one: this step runs in the job that holds the model
+    # key, so what it installs has to be a thing that cannot change under us.
     - uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25 # v22
     # Digest-pinned for the same reason, so the pin above is not theatre -- both of these run before
     # the agent, in the same job, with the same key in the environment.

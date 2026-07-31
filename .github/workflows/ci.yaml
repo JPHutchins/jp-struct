@@ -9,6 +9,11 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Set explicitly: the repository default lives outside this file and can change
+# without a commit.
+permissions:
+  contents: read
+
 jobs:
   # Every wheel for every interpreter, cross-compiled on one runner, which also
   # emits the fan-out for the legs below. The legs are the only other jobs, so
@@ -18,12 +23,12 @@ jobs:
     outputs:
       coverage: ${{ steps.emit.outputs.matrix }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: DeterminateSystems/nix-installer-action@main
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25 # v22
       # Keyed on what determines the closure. A source-only change misses the
       # key but still restores through the prefix, so the interpreter archives
       # -- the expensive part -- survive and only the compiles re-run.
-      - uses: nix-community/cache-nix-action@v7
+      - uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7.0.2
         with:
           primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.lock', 'flake.nix', 'nix/**') }}
           restore-prefixes-first-match: nix-${{ runner.os }}-
@@ -35,7 +40,7 @@ jobs:
       - run: nix develop --command uv sync --no-install-workspace
       - run: nix develop --command uv run --no-sync camas ci
       - run: nix build .#default --out-link result-wheels
-      - uses: actions/upload-artifact@v7
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: wheels
           path: result-wheels/*.whl
@@ -54,9 +59,9 @@ jobs:
       matrix: ${{ fromJSON(needs.wheels.outputs.coverage) }}
     runs-on: ${{ matrix.OS }}
     steps:
-      - uses: actions/checkout@v7
-      - uses: astral-sh/setup-uv@v9.0.0
-      - uses: actions/download-artifact@v8
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: wheels
           path: result-wheels

@@ -7,29 +7,47 @@ on:
   push:
     tags: ["v*"]
 
+# Two tags are two refs, so grouping by ref would let both publish at once.
+# Never cancelled: a half-finished upload is the state worth avoiding.
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
 jobs:
   release:
     runs-on: ubuntu-latest
+    # 50 cross builds is not fast; six hours is still not the number.
+    timeout-minutes: 120
     environment: pypi
     permissions:
+      contents: read
       # Trusted Publishing: PyPI takes a short-lived OIDC token from this
-      # workflow, so there is no API token to hold, rotate or leak.
+      # workflow, so there is no API token to hold, rotate or leak. It is also
+      # why every action below is pinned to a commit: a tag can be moved and a
+      # branch always is, and this is the job that can publish as salix.
       id-token: write
     steps:
-      - uses: actions/checkout@v7
-      - uses: DeterminateSystems/nix-installer-action@main
-      - uses: nix-community/cache-nix-action@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: DeterminateSystems/nix-installer-action@ef8a148080ab6020fd15196c2084a2eea5ff2d25 # v22
+      - uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7.0.2
         with:
           primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.lock', 'flake.nix', 'nix/**') }}
           restore-prefixes-first-match: nix-${{ runner.os }}-
           gc-max-store-size-linux: 5G
 
-      - run: nix develop --command python tools/check_tag.py "${{ github.ref_name }}"
+      - run: nix develop --command uv sync --no-install-workspace
 
-      # The same check CI runs, on the same source: every wheel built and
-      # verified, the payloads matched to their tags, twine --strict over all of
-      # them and the sdist, and the native wheel installed and tested.
-      - run: nix flake check --all-systems
+      # Through env: so the tag reaches the shell as a value, never as text.
+      - env:
+          TAG: ${{ github.ref_name }}
+        run: nix develop --command uv run --no-sync python tools/check_tag.py "$TAG"
+
+      # Invoked, not restated -- restating it is how the old step went stale.
+      # A tag can point at a commit CI never saw, so this cannot be skipped.
+      - run: nix develop --command uv run --no-sync camas ci
 
       - run: nix build .#release --out-link result-release
 
@@ -40,4 +58,4 @@ jobs:
           cp -L result-release/*.whl result-release/*.tar.gz dist/
           ls -l dist
 
-      - uses: pypa/gh-action-pypi-publish@release/v1
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
