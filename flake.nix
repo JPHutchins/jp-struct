@@ -48,10 +48,11 @@
       # PyHeapTypeObject's layout directly, so a cp3XX wheel built against an
       # alpha or a beta is a promise it cannot keep -- and PyPI does not take an
       # upload back.
-      # Matched at the pre-release suffix rather than by looking for the letters
-      # anywhere, so a version string that happens to contain one is not read as
-      # an alpha. `rc` is frozen and deliberately absent.
-      abiIsFrozen = version: builtins.match "[0-9.]+(a|b)[0-9]+" version == null;
+      # Matched against the shapes whose ABI *is* frozen -- a final release, or
+      # an rc, which is where CPython freezes it -- so anything unrecognised is
+      # held back rather than published. The other direction fails open, and an
+      # upload to PyPI is not something a later commit can undo.
+      abiIsFrozen = version: builtins.match "[0-9]+\\.[0-9]+\\.[0-9]+(rc[0-9]+)?" version != null;
 
       releasableWheelNames = map ({ pythonMinor, platformName }: "${pythonMinor}-${platformName}") (
         lib.filter ({ pythonMinor, ... }: abiIsFrozen matrix.pythons.${pythonMinor}.version) wheelIds
@@ -130,10 +131,18 @@
           # What a release uploads: every releasable wheel and the one sdist, in
           # the shape `twine upload` wants. A pre-release interpreter's wheels
           # are still built and still tested, just never published.
-          release = pkgs.symlinkJoin {
-            name = "salix-release";
-            paths = map (name: wheels.${name}) releasableWheelNames ++ [ sdist ];
-          };
+          # An sdist on its own is not a release: it would make every user on
+          # every platform compile. If the whole matrix is pre-release, say so
+          # here rather than in the workflow, where it surfaces as a glob that
+          # matched no .whl.
+          release =
+            assert lib.assertMsg (
+              releasableWheelNames != [ ]
+            ) "no releasable wheels: every pinned interpreter is a pre-release, so nothing has a frozen ABI";
+            pkgs.symlinkJoin {
+              name = "salix-release";
+              paths = map (name: wheels.${name}) releasableWheelNames ++ [ sdist ];
+            };
         in
         {
           inherit

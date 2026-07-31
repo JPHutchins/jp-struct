@@ -28,6 +28,12 @@ stdenv.mkDerivation {
   dontConfigure = true;
   dontInstall = true;
 
+  # This build's payload is discarded -- wheel.nix keeps only the metadata and
+  # swaps in the cross-compiled extension -- but the compile still happens, so
+  # it is a free check on the host compiler and is held to the same -Werror as
+  # everything else here.
+  SALIX_STRICT = "1";
+
   buildPhase = ''
     runHook preBuild
 
