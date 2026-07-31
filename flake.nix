@@ -48,7 +48,10 @@
       # PyHeapTypeObject's layout directly, so a cp3XX wheel built against an
       # alpha or a beta is a promise it cannot keep -- and PyPI does not take an
       # upload back.
-      abiIsFrozen = version: !(lib.hasInfix "a" version || lib.hasInfix "b" version);
+      # Matched at the pre-release suffix rather than by looking for the letters
+      # anywhere, so a version string that happens to contain one is not read as
+      # an alpha. `rc` is frozen and deliberately absent.
+      abiIsFrozen = version: builtins.match "[0-9.]+(a|b)[0-9]+" version == null;
 
       releasableWheelNames = map ({ pythonMinor, platformName }: "${pythonMinor}-${platformName}") (
         lib.filter ({ pythonMinor, ... }: abiIsFrozen matrix.pythons.${pythonMinor}.version) wheelIds

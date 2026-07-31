@@ -27,8 +27,12 @@ BUILD: Final = BuildConfig(
     ),
     # -Wno-unused-parameter: CPython slot signatures are fixed by the API and
     # routinely ignore an argument.
+    # -std=c2x, not -std=c23: they select the same language mode -- both give
+    # __STDC_VERSION__ 202311 -- but c2x is accepted by GCC 9+ and Clang 9+
+    # while c23 needs GCC 14+ or Clang 18+. An sdist has to compile on whatever
+    # the machine has, and Ubuntu 24.04 LTS still ships GCC 13.
     c_flags=(
-        "-std=c23",
+        "-std=c2x",
         "-O2",
         "-Wdouble-promotion",
         "-Wall",
@@ -59,6 +63,8 @@ if __name__ == "__main__":
             print("\n".join(BUILD.c_flags + STRICT))
         case ["c-flags", "--strict", "--shipped"]:
             print("\n".join(BUILD.c_flags + STRICT + SHIPPED))
+        case ["c-flags", "--shipped", *_]:
+            raise SystemExit("build_config.py: --shipped only follows --strict")
         case _:
             raise SystemExit(
                 "usage: build_config.py {sources|c-flags [--strict [--shipped]]}"
