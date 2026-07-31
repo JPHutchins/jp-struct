@@ -1,0 +1,72 @@
+# Code review — thin consumer of the code-review reusable workflow.
+# The full pipeline lives in the pinned ref; this repo keeps only the trigger, the superset
+# permissions, the MODEL_API_KEY secret, .github/prices.json, and its OWN check-running setup
+# (.github/actions/code-review-setup — Nix toolchain + cache + warm uv environment, invoked via
+# use_setup_action). Bump the @ref to upgrade. See: https://github.com/JPHutchins/code-review
+
+name: Code review
+
+on:
+  workflow_run:
+    workflows: ["CI"]       # our CI workflow name — unmodified
+    types: [completed]
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  review:
+    if: >-
+      github.event.workflow_run.event == 'pull_request' &&
+      (github.event.workflow_run.conclusion == 'success' ||
+       github.event.workflow_run.conclusion == 'failure')
+    uses: JPHutchins/code-review/.github/workflows/review-reusable.yaml@v0.1.0-alpha.29
+    with:
+      head_sha:      ${{ github.event.workflow_run.head_sha }}
+      head_branch:   ${{ github.event.workflow_run.head_branch }}
+      head_repo:     ${{ github.event.workflow_run.head_repository.full_name }}
+      run_id:        ${{ github.event.workflow_run.id }}
+      conclusion:    ${{ github.event.workflow_run.conclusion }}
+      trigger_event: ${{ github.event.workflow_run.event }}
+      api_base_url:  ${{ vars.API_BASE_URL }}
+      model_full:    deepseek-v4-pro
+      model_mechanic: deepseek-v4-flash
+      # Check-running via our own Nix composite at .github/actions/code-review-setup, because the dev
+      # shell is the only supported environment here and clang-tidy, gcc -fanalyzer, and the nix
+      # builds come from it -- an install_command could reach the python half of `camas check` and
+      # none of the C half.
+      use_setup_action: true
+      # FIRST RUN IS AUDIT. The extra_endpoints below are DERIVED, not observed: what salix's CI
+      # fetches, plus the hosts jphfmt's audit pass found for the same Nix-composite shape. Read this
+      # run's harden-runner insights, correct the list against what it actually saw, then switch to
+      # block -- until then the egress lock is not enforced and the canary is skipped.
+      egress_policy: audit
+      # Single line per host, folded: the reusable workflow splices this value into harden-runner's
+      # allowed-endpoints AFTER YAML parsing, so a '|' block scalar's newlines would reach the
+      # endpoint parser verbatim and break it.
+      #
+      # nix-quick-install and python-build-standalone ship as GitHub release assets; the nixpkgs flake
+      # input arrives as a codeload tarball; cache.nixos.org is the substituter and tarballs.nixos.org
+      # its fixed-output mirror. crates.io is jphfmt: it is not in nixpkgs, so a cold store builds it
+      # from the crate and its vendored lock. pypi is uv resolving the dev group (camas).
+      extra_endpoints: >-
+        release-assets.githubusercontent.com:443
+        codeload.github.com:443
+        cache.nixos.org:443
+        tarballs.nixos.org:443
+        crates.io:443
+        static.crates.io:443
+        index.crates.io:443
+        pypi.org:443
+        files.pythonhosted.org:443
+      mechanic_time_limit: 3m
+      mechanic_grace_period: 90s
+      mechanic_usd_limit: "0.10"
+      full_review_time_limit: 24m
+      full_review_grace_period: 12m
+      full_review_usd_limit: "0.50"
+    secrets:
+      MODEL_API_KEY: ${{ secrets.MODEL_API_KEY }}
