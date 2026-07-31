@@ -15,9 +15,6 @@ concurrency:
   group: ${{ github.workflow }}
   cancel-in-progress: false
 
-permissions:
-  contents: read
-
 jobs:
   release:
     runs-on: ubuntu-latest
@@ -39,6 +36,9 @@ jobs:
           primary-key: nix-${{ runner.os }}-${{ hashFiles('flake.lock', 'flake.nix', 'nix/**') }}
           restore-prefixes-first-match: nix-${{ runner.os }}-
           gc-max-store-size-linux: 5G
+          # Restore-only. Saving is a REST call needing actions: write, which
+          # this job deliberately does not have; CI owns the cache.
+          save: false
 
       - run: nix develop --command uv sync --no-install-workspace
 

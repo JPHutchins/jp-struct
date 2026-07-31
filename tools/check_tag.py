@@ -26,7 +26,12 @@ CANONICAL_VERSION = re.compile(
 
 
 def declared_version(pyproject: Path) -> str:
-    version: str = tomllib.loads(pyproject.read_text())["project"]["version"]
+    version = tomllib.loads(pyproject.read_text())["project"]["version"]
+
+    if not isinstance(version, str):
+        raise SystemExit(
+            f"pyproject.toml declares a {type(version).__name__} version; it must be a string"
+        )
 
     return version
 

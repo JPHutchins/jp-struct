@@ -102,6 +102,23 @@ def test_the_pattern_accepts_exactly_what_packaging_calls_canonical():
     ] == []
 
 
+@pytest.mark.parametrize("declared", ["1.0", "1", "[\"1.0.0\"]", "true"])
+def test_a_version_that_is_not_a_string_is_refused_with_a_message(declared, tmp_path):
+    (tmp_path / "pyproject.toml").write_text(f"[project]\nversion = {declared}\n")
+
+    result = subprocess.run(
+        [sys.executable, str(CHECK_TAG), "v1.0"],
+        cwd=tmp_path,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "must be a string" in result.stderr
+    assert "Traceback" not in result.stderr
+
+
 def test_no_argument_is_refused(tmp_path):
     result = subprocess.run(
         [sys.executable, str(CHECK_TAG)], cwd=tmp_path, capture_output=True, text=True, check=False
