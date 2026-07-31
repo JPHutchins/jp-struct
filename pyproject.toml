@@ -11,6 +11,43 @@ requires-python = ">=3.10"
 authors = [{ name = "JP Hutchins", email = "jphutchins@gmail.com" }]
 license = "MIT"
 license-files = ["LICENSE"]
+keywords = [
+    "struct",
+    "dataclass",
+    "slots",
+    "frozen",
+    "immutable",
+    "import-time",
+    "free-threading",
+    "c-extension",
+]
+# No "License :: OSI Approved :: MIT License": PyPI rejects a distribution that
+# carries it alongside License-Expression.
+#
+# PyPy and GraalPy satisfy requires-python, find no wheel, and cannot compile
+# this source; the CPython classifier is the declared signal for that.
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Programming Language :: C",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3.15",
+    "Programming Language :: Python :: Implementation :: CPython",
+    "Programming Language :: Python :: Free Threading :: 3 - Stable",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Typing :: Typed",
+]
+
+[project.urls]
+Repository = "https://github.com/JPHutchins/salix"
+Issues = "https://github.com/JPHutchins/salix/issues"
+Changelog = "https://github.com/JPHutchins/salix/blob/main/CHANGELOG.md"
 
 # The C source is wired up in setup.py because setuptools does not yet support
 # declaring ext_modules in pyproject.toml.
