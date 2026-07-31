@@ -1,7 +1,6 @@
-/* struct — a minimal, C-backed, inheritable ``Struct`` base class.
+/* salix — a minimal, C-backed, inheritable ``Struct`` base class.
  *
- * This is the seed implementation copied from the feasibility prototype
- * (JPHutchins/record-type PR #1). It answers: can record-type's features be
+ * It answers a question first asked of record-type: can those features be
  * delivered as an inheritable base class (like ``typing.NamedTuple``)
  * implemented in C, with msgspec-class type-creation speed but a tiny fraction
  * of msgspec's import cost?
@@ -16,8 +15,9 @@
  *                       class-body annotations (``a: int``), exactly like
  *                       NamedTuple/dataclass/msgspec.
  *   - per-type vectorcall for instance creation (fields written straight to
- *     slot memory, no Python bytecode), read-only members for a frozen class,
- *     and C-level ``__eq__`` / ``__hash__`` / ``__repr__`` from a mixin base.
+ *     slot memory, no Python bytecode), and C-level ``__eq__`` / ``__hash__`` /
+ *     ``__repr__`` / ``__setattr__`` from a mixin base -- the last of which is
+ *     what makes a frozen class frozen.
  *
  * What this intentionally does NOT do (so the .so stays tiny and the import
  * stays sub-millisecond): no serialization, no validation, no type coercion,
@@ -39,11 +39,11 @@ static enum result add_struct_base(PyObject * module);
 static PyObject * create_struct_base(void);
 
 /*
- * Everything shared between threads is written once and then only read: a
- * type's field metadata at class creation, and an instance's slots before the
- * constructor returns it. What writes a live instance is CPython's own member
- * descriptor, so a free-threaded build's guarantees there are inherited rather
- * than reimplemented.
+ * A type's field metadata is written once at class creation and then only
+ * read. An instance's slots are written by the constructor before it returns,
+ * and afterwards by exactly two paths -- the member descriptor and set_field --
+ * both of which reach the slot through PyMember_SetOne, so a free-threaded
+ * build's guarantees there are inherited rather than reimplemented.
  */
 static PyModuleDef_Slot struct_slots[] = {
 	{Py_mod_exec, struct_exec},

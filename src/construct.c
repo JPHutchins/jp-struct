@@ -12,6 +12,15 @@ struct field_lookup {
 	Py_ssize_t index;
 };
 
+/* What type.__new__ makes a __slots__ entry. The Py_-prefixed spellings arrived
+ * with 3.12; before that the name lives in structmember.h, which types.h pulls
+ * in for exactly this reason. */
+#if PY_VERSION_HEX < 0x030C0000
+enum { SLOT_MEMBER_TYPE = T_OBJECT_EX };
+#else
+enum { SLOT_MEMBER_TYPE = Py_T_OBJECT_EX };
+#endif
+
 static void bind_positional(
 	StructType const * type,
 	PyObject * self,
@@ -31,6 +40,12 @@ static enum result fill_defaults(
 	Py_ssize_t positional_count
 );
 static struct field_lookup find_field(StructType const * type, PyObject * name);
+static enum result write_slot(
+	StructType const * type,
+	PyObject * self,
+	Py_ssize_t index,
+	PyObject * value
+);
 static enum result run_post_init(StructType const * type, PyObject * self);
 
 /*
@@ -199,9 +214,10 @@ static enum result fill_defaults(
  * safety argument: the escape hatch reaches exactly what the class already
  * spells out, and nothing else.
  *
- * Intended for __post_init__, before the instance has escaped. Writing one that
- * another thread already holds is the caller's problem, as it is for any object
- * whose invariants outlive its constructor.
+ * Intended for __post_init__, before the instance has escaped. Which value a
+ * racing write leaves behind is the caller's problem, as it is for any object
+ * whose invariants outlive its constructor -- but only which value: the write
+ * itself is as safe as `self.x = v`, and for the same reason.
  */
 PyObject * Struct_set_field(PyObject * const module, PyObject * const arguments) {
 	PyObject * self = NULL;
@@ -248,10 +264,39 @@ PyObject * Struct_set_field(PyObject * const module, PyObject * const arguments)
 
 			return NULL;
 		case FIELD_LOOKUP_FOUND:
-			Py_XSETREF(*struct_slot(type, self, found.index), Py_NewRef(value));
+			if (write_slot(type, self, found.index, value) != RESULT_OK) {
+				return NULL;
+			}
 	}
 
 	Py_RETURN_NONE;
+}
+
+/*
+ * Through CPython's own member setter rather than a store of our own, so the
+ * free-threading guarantee is inherited here exactly as it is for `self.x = v`.
+ * A plain Py_XSETREF is a load, a store and a decref: two threads read the same
+ * previous value, both store, and both release it -- one reference, two
+ * releases, and 3.14t dies on it. PyMember_SetOne takes a critical section on
+ * the instance and defers the release past the end of it.
+ *
+ * The offset is the one type.__new__ gave this field, so the descriptor here
+ * describes a slot that already exists; nothing is resolved by name, which is
+ * the cost the alternative would have carried.
+ */
+static enum result write_slot(
+	StructType const * const type,
+	PyObject * const self,
+	Py_ssize_t const index,
+	PyObject * const value
+) {
+	PyMemberDef slot = {
+		.name = "",
+		.type = SLOT_MEMBER_TYPE,
+		.offset = type->struct_slot_offsets[index],
+	};
+
+	return PyMember_SetOne((char *) self, &slot, value) == 0 ? RESULT_OK : RESULT_ERROR;
 }
 
 /*
