@@ -25,7 +25,6 @@ import sys
 import tempfile
 import timeit
 from collections.abc import Callable
-from importlib.util import find_spec
 from pathlib import Path
 from typing import NamedTuple
 
@@ -47,6 +46,7 @@ _ENV = {**os.environ, "PYTHONPATH": os.pathsep.join(
 class Construct(NamedTuple):
     key: str          # unique module name (must differ from any real library)
     label: str
+    short: str        # the closing summary's column, which has no room for label
     dep: str | None   # the dependency library to import (None = no dependency)
     header: str
     body: Callable[[int], str]
@@ -55,6 +55,7 @@ class Construct(NamedTuple):
 
 class Row(NamedTuple):
     label: str
+    short: str
     dep_ms: float
     per_type_us: float
     instantiate_ns: float
@@ -81,8 +82,9 @@ def _record_type(i: int) -> str:
     return f"@record\ndef C{i}(a: int, b: int, c: int) -> None: ...\n"
 
 
-# The import belongs to the constructor and not to the module, so a construct
-# whose dependency is absent costs nothing to skip.
+# A rival's import belongs to its constructor and not to the module, so a
+# construct that cannot be built costs nothing to skip. typing is not a rival:
+# it is stdlib, and Construct and Row already need it up there.
 def _struct_ctor() -> Callable[[int, int, int], object]:
     from salix import Struct
 
@@ -133,30 +135,20 @@ def _record_type_ctor() -> Callable[[int, int, int], object]:
     return C  # type: ignore[no-any-return]
 
 
-# An unbuilt salix/ still holds py.typed and the stub, which makes it a
-# namespace package: find_spec answers, and the module it names is empty.
-def _installed(dep: str | None) -> bool:
-    return dep is None or ((spec := find_spec(dep)) is not None and spec.loader is not None)
-
-
 # A rival to measure against, not a requirement: record-type carries a
 # python_version>='3.11' marker and is simply absent below that.
-CONSTRUCTS = [
-    c
-    for c in (
-        Construct("gen_salix", "salix (this project)", "salix",
-                  "from salix import Struct", _struct, _struct_ctor),
-        Construct("gen_msgspec", "msgspec.Struct", "msgspec",
-                  "import msgspec", _msgspec, _msgspec_ctor),
-        Construct("gen_namedtuple", "typing.NamedTuple", "typing",
-                  "from typing import NamedTuple", _namedtuple, _namedtuple_ctor),
-        Construct("gen_dcfrozen", "dataclass (frozen+slots)", "dataclasses",
-                  "from dataclasses import dataclass", _dc_frozen, _dc_frozen_ctor),
-        Construct("gen_recordtype", "record-type (@record)", "records",
-                  "from records import record", _record_type, _record_type_ctor),
-    )
-    if _installed(c.dep)
-]
+CONSTRUCTS = (
+    Construct("gen_salix", "salix (this project)", "salix", "salix",
+              "from salix import Struct", _struct, _struct_ctor),
+    Construct("gen_msgspec", "msgspec.Struct", "msgspec", "msgspec",
+              "import msgspec", _msgspec, _msgspec_ctor),
+    Construct("gen_namedtuple", "typing.NamedTuple", "NamedTuple", "typing",
+              "from typing import NamedTuple", _namedtuple, _namedtuple_ctor),
+    Construct("gen_dcfrozen", "dataclass (frozen+slots)", "dataclass", "dataclasses",
+              "from dataclasses import dataclass", _dc_frozen, _dc_frozen_ctor),
+    Construct("gen_recordtype", "record-type (@record)", "record-type", "records",
+              "from records import record", _record_type, _record_type_ctor),
+)
 
 # Which rows the closing summary compares, when they survived the filter.
 HEADLINE = ("gen_salix", "gen_namedtuple", "gen_msgspec")
@@ -194,10 +186,27 @@ def dep_ms(c: Construct, work: Path) -> float:
     return statistics.median(samples) / 1000
 
 
-def build_constructors() -> dict[str, Callable[[int, int, int], object]]:
-    """Real in-process 3-field constructors (avoids exec/PEP-649 quirks)."""
+def _constructor(c: Construct) -> Callable[[int, int, int], object] | None:
+    try:
+        return c.ctor()
+    except ImportError:
+        return None
 
-    return {c.key: c.ctor() for c in CONSTRUCTS}
+
+def build_constructors() -> dict[str, Callable[[int, int, int], object]]:
+    """Real in-process 3-field constructors (avoids exec/PEP-649 quirks).
+
+    Building one is also the availability test, because there is no cheaper
+    question that gives the right answer. find_spec proves a module can be
+    located, which is not that it imports: an unbuilt salix/ holds py.typed and
+    the stub and is a namespace package, and the `records` on PyPI is a SQL
+    library with no `record` in it. A rival that is installed and still broken
+    for some other reason stays loud -- only ImportError means "not here".
+    """
+
+    built = ((c.key, _constructor(c)) for c in CONSTRUCTS)
+
+    return {key: ctor for key, ctor in built if ctor is not None}
 
 
 def instantiate_ns(ctor: Callable[[int, int, int], object]) -> float:
@@ -212,9 +221,10 @@ def main() -> None:
     with tempfile.TemporaryDirectory() as tmp:
         work = Path(tmp)
         rows = {
-            c.key: Row(c.label, dep_ms(c, work), per_type_us(c, work),
+            c.key: Row(c.label, c.short, dep_ms(c, work), per_type_us(c, work),
                        instantiate_ns(ctors[c.key]))
             for c in CONSTRUCTS
+            if c.key in ctors
         }
 
     w = max(len(r.label) for r in rows.values())
@@ -227,10 +237,10 @@ def main() -> None:
     def total(r: Row, n: int) -> float:
         return r.dep_ms + n * r.per_type_us / 1000
 
-    headline = [(rows[k].label.split()[0], rows[k]) for k in HEADLINE if k in rows]
+    headline = [rows[k] for k in HEADLINE if k in rows]
     for n in (1, 10, 100, 1000):
         print(f"  N={n:<5}  "
-              + "   ".join(f"{name} {total(row, n):8.3f} ms" for name, row in headline))
+              + "   ".join(f"{r.short} {total(r, n):8.3f} ms" for r in headline))
 
 
 if __name__ == "__main__":
