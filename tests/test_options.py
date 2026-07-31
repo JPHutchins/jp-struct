@@ -115,6 +115,55 @@ class TestEq:
         with pytest.raises(TypeError, match="unhashable"):
             hash(Custom(1))
 
+    def test_a_subclass_of_a_body_eq_class_is_unhashable_too(self):
+        """It resolves that __eq__ through the MRO, so it owes the same debt --
+        and a structural hash beside an __eq__ that answers True would put two
+        equal instances in two slots of a set.
+        """
+
+        class Custom(Struct):  # noqa: PLW1641 -- the absent __hash__ is the assertion
+            x: object
+
+            def __eq__(self, other: object) -> bool:
+                return True
+
+        class Child(Custom):
+            y: object = 0
+
+        class Grandchild(Child):
+            z: object = 0
+
+        assert Child.__hash__ is None
+        assert Grandchild.__hash__ is None
+
+    def test_freezing_under_a_body_eq_base_does_not_buy_back_the_hash(self):
+        """A fieldless base may be mutable and its child frozen, so `__hash__ is
+        None` on the base does not say which rule put it there. Only the one
+        about __eq__ survives into the child.
+        """
+
+        class Loose(Struct, frozen=False):  # noqa: PLW1641 -- the absent __hash__ is the assertion
+            def __eq__(self, other: object) -> bool:
+                return True
+
+        class Frozen(Loose, frozen=True):
+            x: int
+
+        assert Frozen.__hash__ is None
+
+    def test_a_subclass_may_take_equality_back_and_become_hashable(self):
+        class Custom(Struct):  # noqa: PLW1641 -- eq=False below is the replacement
+            x: object
+
+            def __eq__(self, other: object) -> bool:
+                return True
+
+        class Child(Custom, eq=False):
+            y: object = 0
+
+        assert Child.__hash__ is object.__hash__
+        assert Child(1) != Child(1)
+
     def test_a_body_definition_wins_over_the_option(self):
         class Custom(Struct, eq=False):
             x: object

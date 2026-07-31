@@ -28,23 +28,31 @@ static void StructMeta_dealloc(PyObject * self);
 
 static StructType * find_struct_base(PyObject * bases);
 static bool has_weakref_slot(StructType const * base);
+static bool inherits_body_eq(StructType const * base);
 static PyObject * build_class_namespace(
 	PyObject * original_namespace,
 	PyObject * all_names,
 	PyObject * new_names,
 	struct options options,
 	struct options inherited,
-	bool base_has_weakref
+	StructType const * base
 );
 static PyObject * build_slots(PyObject * new_names, bool weakref);
 static enum result set_match_args(PyObject * namespace, PyObject * all_names, bool wanted);
 static enum result apply_options(
 	PyObject * namespace,
 	struct options options,
-	struct options inherited
+	struct options inherited,
+	bool base_defines_eq
 );
 static enum result rebind(PyObject * namespace, char const * const * names, bool from_mixin);
-static enum result bind_hash(PyObject * namespace, struct options options, bool body_defines_eq);
+static enum result bind_hash(
+	PyObject * namespace,
+	struct options options,
+	struct options inherited,
+	bool body_defines_eq,
+	bool base_defines_eq
+);
 static enum result drop_class_variables(PyObject * namespace, PyObject * all_names);
 static StructType * create_class(
 	PyTypeObject * metatype,
@@ -174,7 +182,7 @@ PyObject * StructMeta_new(
 			plan.new_names,
 			request.options,
 			inherited,
-			has_weakref_slot(base)
+			base
 		)
 	);
 	StructType * struct_class = (
@@ -214,6 +222,37 @@ static bool has_weakref_slot(StructType const * const base) {
 	return base != NULL && base->heap_type.ht_type.tp_weaklistoffset != 0;
 }
 
+/*
+ * Whether this class will resolve an __eq__ that salix did not bind. salix
+ * binds the mixin's or object's, so anything else came from a class body, and
+ * Python's rule -- a body defining __eq__ and not __hash__ is unhashable --
+ * reaches a subclass through the MRO even though its own body has neither.
+ *
+ * An unhashable tp_hash is the cheap gate, not the answer: a base is also
+ * unhashable for being mutable with structural equality, and that reason does
+ * not survive into a child that freezes itself, which a fieldless base permits.
+ * The gate keeps the lookups off the common path, class creation being the
+ * number this project is careful about; none of the three can fail, since
+ * every type answers __eq__.
+ */
+static bool inherits_body_eq(StructType const * const base) {
+	if (base == NULL || base->heap_type.ht_type.tp_hash != PyObject_HashNotImplemented) {
+		return false;
+	}
+
+	PY_OWNED(inherited_eq, PyObject_GetAttrString((PyObject *) base, "__eq__"));
+	PY_OWNED(mixin_eq, PyObject_GetAttrString((PyObject *) &StructMixin_Type, "__eq__"));
+	PY_OWNED(object_eq, PyObject_GetAttrString((PyObject *) &PyBaseObject_Type, "__eq__"));
+
+	if (inherited_eq == NULL || mixin_eq == NULL || object_eq == NULL) {
+		PyErr_Clear();
+
+		return false;
+	}
+
+	return inherited_eq != mixin_eq && inherited_eq != object_eq;
+}
+
 /* The namespace handed to type.__new__: a copy of the original with the
  * default-bearing field names removed (so __slots__ won't clash with a class
  * variable) plus __slots__ / __match_args__ and whatever the options replace. */
@@ -223,9 +262,9 @@ static PyObject * build_class_namespace(
 	PyObject * const new_names,
 	struct options const options,
 	struct options const inherited,
-	bool const base_has_weakref
+	StructType const * const base
 ) {
-	PY_OWNED(slots, build_slots(new_names, options.weakref && !base_has_weakref));
+	PY_OWNED(slots, build_slots(new_names, options.weakref && !has_weakref_slot(base)));
 	PY_MOVABLE(namespace, PyDict_Copy(original_namespace));
 
 	if (
@@ -234,7 +273,7 @@ static PyObject * build_class_namespace(
 		drop_class_variables(namespace, all_names) == RESULT_OK &&
 		PyDict_SetItemString(namespace, "__slots__", slots) == 0 &&
 		set_match_args(namespace, all_names, options.match_args) == RESULT_OK &&
-		apply_options(namespace, options, inherited) == RESULT_OK
+		apply_options(namespace, options, inherited, inherits_body_eq(base)) == RESULT_OK
 	) {
 		return py_move(&namespace);
 	}
@@ -299,7 +338,8 @@ static enum result set_match_args(
 static enum result apply_options(
 	PyObject * const namespace,
 	struct options const options,
-	struct options const inherited
+	struct options const inherited,
+	bool const base_defines_eq
 ) {
 	/* Read before the rebinds below: afterwards every comparison name is
 	 * present whether the body wrote one or salix did. */
@@ -338,7 +378,7 @@ static enum result apply_options(
 		return RESULT_ERROR;
 	}
 
-	return bind_hash(namespace, options, body_defines_eq);
+	return bind_hash(namespace, options, inherited, body_defines_eq, base_defines_eq);
 }
 
 /* A name the class body defined is neither source's to take. */
@@ -377,14 +417,23 @@ static enum result rebind(
 static enum result bind_hash(
 	PyObject * const namespace,
 	struct options const options,
-	bool const body_defines_eq
+	struct options const inherited,
+	bool const body_defines_eq,
+	bool const base_defines_eq
 ) {
 	if (PyDict_GetItemString(namespace, "__hash__") != NULL) {
 		return RESULT_OK;
 	}
 
-	/* Python's rule: a body that defines __eq__ and not __hash__ is unhashable. */
-	if (body_defines_eq || (options.eq && !options.frozen)) {
+	/* Python's rule: a body that defines __eq__ and not __hash__ is unhashable.
+	 * An inherited body __eq__ carries the same debt to a subclass whose own
+	 * body has neither -- and only taking equality back, by writing __eq__ or
+	 * by changing the eq option, replaces what the MRO would resolve. */
+	if (
+		body_defines_eq ||
+		(options.eq && !options.frozen) ||
+		(base_defines_eq && options.eq == inherited.eq)
+	) {
 		return PyDict_SetItemString(namespace, "__hash__", Py_None) == 0 ? RESULT_OK : RESULT_ERROR;
 	}
 
