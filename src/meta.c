@@ -244,10 +244,14 @@ static bool inherits_body_eq(StructType const * const base) {
 	PY_OWNED(mixin_eq, PyObject_GetAttrString((PyObject *) &StructMixin_Type, "__eq__"));
 	PY_OWNED(object_eq, PyObject_GetAttrString((PyObject *) &PyBaseObject_Type, "__eq__"));
 
+	/* Unreachable, and answered in the safe direction anyway: a class wrongly
+	 * left unhashable says so the first time anyone hashes it, where one wrongly
+	 * given a hash puts two equal instances in two slots of a set and says
+	 * nothing. */
 	if (inherited_eq == NULL || mixin_eq == NULL || object_eq == NULL) {
 		PyErr_Clear();
 
-		return false;
+		return true;
 	}
 
 	return inherited_eq != mixin_eq && inherited_eq != object_eq;
@@ -442,8 +446,9 @@ static enum result bind_hash(
 	return rebind(namespace, hash_name, options.eq);
 }
 
-/* A field with a default is bound in the class body, where it would collide
- * with the __slots__ descriptor of the same name. */
+/* Any class-body binding of a field name -- an annotated default, or a bare
+ * assignment over a name the base already declared -- would sit in this class's
+ * dict ahead of the __slots__ descriptor that reads the value. */
 static enum result drop_class_variables(PyObject * const namespace, PyObject * const all_names) {
 	for (Py_ssize_t i = 0; i < PyList_GET_SIZE(all_names); ++i) {
 		PyObject * const field_name = PyList_GET_ITEM(all_names, i);
