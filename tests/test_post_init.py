@@ -11,7 +11,7 @@ import sys
 import pytest
 from values import EVERY, identify
 
-from salix import Struct
+from salix import Struct, set_field
 
 
 class Validated(Struct):
@@ -70,13 +70,14 @@ def test_a_mutable_struct_can_derive_a_field_from_the_others():
 def test_object_setattr_on_a_frozen_struct_follows_the_interpreter():
     """The frozen-dataclass escape hatch reaches a struct only on 3.13 and up.
 
-    Before that, CPython's setattr hackcheck walked past the heap types to the
-    first static base and refused unless that one's tp_setattro was the generic
-    one. For a dataclass that base is object; for a struct it is the mixin,
-    whose slot is what freezing *is*. 3.13 dropped the check.
+    CPython's setattr hackcheck walks the MRO to whichever type defines the
+    current tp_setattro and refuses unless it is object's. For a dataclass that
+    is object; for a struct it is the mixin, whose slot is what freezing *is*.
+    3.13 dropped the check.
 
-    So validation in `__post_init__` is portable and deriving a field is not --
-    a struct that derives asks for frozen=False, as `Derived` does.
+    This is why set_field exists: it is the door that does not depend on the
+    interpreter. object.__setattr__ is not a supported way into a struct, and
+    this test pins what it does rather than endorsing it.
     """
 
     class Frozen(Struct):
@@ -91,6 +92,39 @@ def test_object_setattr_on_a_frozen_struct_follows_the_interpreter():
     else:
         with pytest.raises(TypeError, match="can't apply this __setattr__"):
             Frozen(21)
+
+
+def test_set_field_derives_a_frozen_field_on_every_interpreter():
+    """The supported way, and the reason this issue is closed.
+
+    set_field resolves the name against the field table and writes that slot --
+    the path the constructor takes -- so it reaches exactly the fields the class
+    declared and cannot add an attribute.
+    """
+
+    class Frozen(Struct):
+        reading: int
+        doubled: int = 0
+
+        def __post_init__(self) -> None:
+            set_field(self, "doubled", self.reading * 2)
+
+    assert Frozen(21).doubled == 42
+
+
+def test_set_field_refuses_a_name_the_class_did_not_declare():
+    with pytest.raises(AttributeError, match="has no field 'absent'"):
+        set_field(Derived(1), "absent", 9)
+
+
+def test_set_field_refuses_something_that_is_not_a_struct():
+    with pytest.raises(TypeError, match="expects a struct, not int"):
+        set_field(1, "reading", 9)  # type: ignore[arg-type]
+
+
+def test_set_field_refuses_a_name_that_is_not_a_string():
+    with pytest.raises(TypeError, match="field name must be str, not int"):
+        set_field(Derived(1), 5, 9)  # type: ignore[arg-type]
 
 
 def test_it_is_inherited():

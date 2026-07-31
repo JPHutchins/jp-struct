@@ -16,8 +16,8 @@
  *                       class-body annotations (``a: int``), exactly like
  *                       NamedTuple/dataclass/msgspec.
  *   - per-type vectorcall for instance creation (fields written straight to
- *     slot memory, no Python bytecode), a frozen ``tp_setattro``, and C-level
- *     ``__eq__`` / ``__hash__`` / ``__repr__`` inherited from a mixin base.
+ *     slot memory, no Python bytecode), read-only members for a frozen class,
+ *     and C-level ``__eq__`` / ``__hash__`` / ``__repr__`` from a mixin base.
  *
  * What this intentionally does NOT do (so the .so stays tiny and the import
  * stays sub-millisecond): no serialization, no validation, no type coercion,
@@ -28,6 +28,7 @@
 #define PY_SSIZE_T_CLEAN
 #include <Python.h>
 
+#include "construct.h"
 #include "meta.h"
 #include "mixin.h"
 #include "owned.h"
@@ -55,12 +56,23 @@ static PyModuleDef_Slot struct_slots[] = {
 	{0, NULL},
 };
 
+static PyMethodDef struct_functions[] = {
+	{
+		.ml_name = "set_field",
+		.ml_meth = Struct_set_field,
+		.ml_flags = METH_VARARGS,
+		.ml_doc = "set_field(instance, name, value) -- assign a field the class declared.",
+	},
+	{.ml_name = NULL},
+};
+
 static PyModuleDef struct_module = {
 	PyModuleDef_HEAD_INIT,
 	.m_name = "salix",
 	.m_doc = "A minimal C-backed inheritable Struct base class.",
 	.m_size = 0,
 	.m_slots = struct_slots,
+	.m_methods = struct_functions,
 };
 
 PyMODINIT_FUNC PyInit_salix(void) {

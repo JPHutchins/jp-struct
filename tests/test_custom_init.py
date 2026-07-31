@@ -11,7 +11,7 @@ import sys
 
 import pytest
 
-from salix import Struct
+from salix import Struct, set_field
 
 
 class Generated(Struct):
@@ -109,6 +109,18 @@ def test_a_frozen_struct_with_a_body_init_cannot_write_its_fields():
 
     with pytest.raises(TypeError, match="does not support attribute assignment"):
         Frozen()
+
+
+def test_a_frozen_body_init_writes_its_fields_with_set_field():
+    """The portable way. object.__setattr__ below is the one that is not."""
+
+    class Frozen(Struct):
+        x: int
+
+        def __init__(self) -> None:
+            set_field(self, "x", 1)
+
+    assert Frozen().x == 1
 
 
 @pytest.mark.skipif(

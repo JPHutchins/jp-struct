@@ -8,3 +8,6 @@ PyObject * Struct_vectorcall(
 	size_t argument_count_and_flags,
 	PyObject * keyword_names
 );
+
+/* salix.set_field(instance, name, value) -- see construct.c. */
+PyObject * Struct_set_field(PyObject * module, PyObject * arguments);

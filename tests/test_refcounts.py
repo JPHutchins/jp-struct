@@ -12,7 +12,7 @@ import sysconfig
 
 import pytest
 
-from salix import Struct
+from salix import Struct, set_field
 
 pytestmark = pytest.mark.skipif(
     bool(sysconfig.get_config_var("Py_GIL_DISABLED")),
@@ -203,3 +203,47 @@ def test_a_post_init_that_raises_releases_the_fields_it_already_saw():
     gc.collect()
 
     assert sys.getrefcount(sentinel) == before
+
+
+def test_set_field_releases_the_value_it_replaces():
+    """The write is a replacement, so the old value has to go.
+
+    Sealing a frozen struct's members with Py_READONLY was tried here and
+    reverted: CPython's clear_slots skips a read-only member, so every frozen
+    struct leaked one reference per field. These tests are what caught it.
+    """
+
+    replaced = Sentinel()
+    pair = Pair(replaced, "second")
+    before = sys.getrefcount(replaced)
+
+    set_field(pair, "first", "written")
+
+    assert sys.getrefcount(replaced) == before - 1
+    assert pair.first == "written"
+
+
+def test_set_field_takes_one_reference_to_what_it_writes():
+    written = Sentinel()
+    pair = Pair("first", "second")
+    before = sys.getrefcount(written)
+
+    set_field(pair, "first", written)
+
+    assert sys.getrefcount(written) == before + 1
+
+    del pair
+    gc.collect()
+
+    assert sys.getrefcount(written) == before
+
+
+def test_a_refused_set_field_takes_nothing():
+    value = Sentinel()
+    pair = Pair("first", "second")
+    before = sys.getrefcount(value)
+
+    with pytest.raises(AttributeError):
+        set_field(pair, "absent", value)
+
+    assert sys.getrefcount(value) == before

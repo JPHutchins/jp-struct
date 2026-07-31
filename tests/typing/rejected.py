@@ -6,7 +6,7 @@ starts accepting one of these. That inversion is the only way to test for a
 diagnostic rather than for its absence.
 """
 
-from salix import Struct
+from salix import Struct, set_field
 
 
 class Point(Struct):
@@ -79,3 +79,11 @@ def match_args_false_leaves_no_positional_pattern() -> None:
     match NoMatchArgs(1):
         case NoMatchArgs(rank):  # type: ignore[misc]
             print(rank)
+
+
+def set_field_will_not_take_a_non_struct() -> None:
+    set_field(1, "x", 9)  # type: ignore[arg-type]
+
+
+def set_field_will_not_take_a_name_that_is_not_a_string() -> None:
+    set_field(Point(1, "two"), 5, 9)  # type: ignore[arg-type]

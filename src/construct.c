@@ -1,6 +1,7 @@
 #include <Python.h>
 
 #include "construct.h"
+#include "meta.h"
 #include "owned.h"
 #include "result.h"
 #include "types.h"
@@ -82,8 +83,8 @@ PyObject * Struct_vectorcall(
 /*
  * The last thing the constructor does, so what it validates is a struct with
  * every field already written. Frozen means it cannot assign one back --
- * object.__setattr__ is the deliberate way through, as it is for a frozen
- * dataclass.
+ * set_field below is the deliberate way through, and the only one, since a
+ * frozen class's fields are read-only to every other path.
  */
 static enum result run_post_init(StructType const * const type, PyObject * const self) {
 	if (type->struct_post_init == NULL) {
@@ -186,6 +187,71 @@ static enum result fill_defaults(
 	}
 
 	return RESULT_OK;
+}
+
+/*
+ * The one way to write a struct's field after it is built, and the reason a
+ * frozen one can still be computed rather than only passed in.
+ *
+ * It resolves the name against the field table and writes that slot, which is
+ * the path the constructor takes, so it cannot add an attribute -- a name the
+ * class did not declare has no slot to write and is an error. That is the whole
+ * safety argument: the escape hatch reaches exactly what the class already
+ * spells out, and nothing else.
+ *
+ * Intended for __post_init__, before the instance has escaped. Writing one that
+ * another thread already holds is the caller's problem, as it is for any object
+ * whose invariants outlive its constructor.
+ */
+PyObject * Struct_set_field(PyObject * const module, PyObject * const arguments) {
+	PyObject * self = NULL;
+	PyObject * name = NULL;
+	PyObject * value = NULL;
+
+	if (!PyArg_UnpackTuple(arguments, "set_field", 3, 3, &self, &name, &value)) {
+		return NULL;
+	}
+
+	if (!PyObject_TypeCheck((PyObject *) Py_TYPE(self), &StructMeta_Type)) {
+		PyErr_Format(
+			PyExc_TypeError,
+			"set_field() expects a struct, not %.200s",
+			Py_TYPE(self)->tp_name
+		);
+
+		return NULL;
+	}
+
+	if (!PyUnicode_Check(name)) {
+		PyErr_Format(
+			PyExc_TypeError,
+			"set_field() field name must be str, not %.200s",
+			Py_TYPE(name)->tp_name
+		);
+
+		return NULL;
+	}
+
+	StructType * const type = struct_type_of(self);
+	struct field_lookup const found = find_field(type, name);
+
+	switch (found.tag) {
+		case FIELD_LOOKUP_ERROR:
+			return NULL;
+		case FIELD_LOOKUP_MISSING:
+			PyErr_Format(
+				PyExc_AttributeError,
+				"%.200s has no field '%U'",
+				struct_type_name(type),
+				name
+			);
+
+			return NULL;
+		case FIELD_LOOKUP_FOUND:
+			Py_XSETREF(*struct_slot(type, self, found.index), Py_NewRef(value));
+	}
+
+	Py_RETURN_NONE;
 }
 
 /*
