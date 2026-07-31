@@ -41,6 +41,15 @@ def test_slots_and_no_dict():
     assert Point2D.__slots__ == ("x", "y")
 
 
+def test_non_ascii_field_name():
+    class MenuItem(Struct):
+        café: int
+
+    item = MenuItem(café=3)
+    assert item.café == 3
+    assert item.__struct_fields__ == ("café",)
+
+
 def test_match_args():
     assert Point2D.__match_args__ == ("x", "y")
     match Point2D(1.0, 2.0):
