@@ -16,7 +16,7 @@ DATABASE: Final = ROOT / "compile_flags.txt"
 
 sys.path.insert(0, str(ROOT))
 
-from build_config import BUILD  # noqa: E402
+from build_config import BUILD, STRICT  # noqa: E402
 
 FLAGS: Final = (
     *shlex.split(sysconfig.get_config_var("CFLAGS")),
@@ -24,6 +24,7 @@ FLAGS: Final = (
     f"-I{sysconfig.get_config_var('prefix')}/include",
     f"-I{sysconfig.get_paths()['include']}",
     *BUILD.c_flags,
+    *STRICT,
 )
 
 

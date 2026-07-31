@@ -60,7 +60,7 @@ stdenvNoCC.mkDerivation {
     mkdir -p "$NIX_BUILD_TOP/python"
     tar xzf ${distribution} --strip-components=1 -C "$NIX_BUILD_TOP/python"
 
-    mapfile -t cFlags < <(python3 build_config.py c-flags)
+    mapfile -t cFlags < <(python3 build_config.py c-flags --strict --shipped)
     mapfile -t sources < <(python3 build_config.py sources)
 
     zig cc \

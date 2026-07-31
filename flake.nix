@@ -44,6 +44,16 @@
         )
       ) pinnedPythons;
 
+      # CPython freezes the ABI at the first release candidate, and salix reads
+      # PyHeapTypeObject's layout directly, so a cp3XX wheel built against an
+      # alpha or a beta is a promise it cannot keep -- and PyPI does not take an
+      # upload back.
+      abiIsFrozen = version: !(lib.hasInfix "a" version || lib.hasInfix "b" version);
+
+      releasableWheelNames = map ({ pythonMinor, platformName }: "${pythonMinor}-${platformName}") (
+        lib.filter ({ pythonMinor, ... }: abiIsFrozen matrix.pythons.${pythonMinor}.version) wheelIds
+      );
+
       # Only what a wheel is built from, so editing the README or the tests does
       # not invalidate every cross build.
       buildSource = lib.fileset.toSource {
@@ -102,7 +112,11 @@
             paths = lib.attrValues wheels;
           };
 
-          named = lib.mapAttrs' (name: wheel: lib.nameValuePair "wheel-${name}" wheel) wheels;
+          # Nix splits an attribute path on `.`, so `wheel-3.14-*` reaches the
+          # parser as `wheel-3` and cannot be built by name.
+          named = lib.mapAttrs' (
+            name: wheel: lib.nameValuePair "wheel-${lib.replaceStrings [ "." ] [ "" ] name}" wheel
+          ) wheels;
 
           jphfmt = pkgs.callPackage ./nix/jphfmt.nix { };
 
@@ -110,11 +124,12 @@
 
           sdist = pkgs.callPackage ./nix/sdist.nix { src = buildSource; };
 
-          # What a release uploads: every wheel and the one sdist, in the shape
-          # `twine upload` wants.
+          # What a release uploads: every releasable wheel and the one sdist, in
+          # the shape `twine upload` wants. A pre-release interpreter's wheels
+          # are still built and still tested, just never published.
           release = pkgs.symlinkJoin {
             name = "salix-release";
-            paths = lib.attrValues wheels ++ [ sdist ];
+            paths = map (name: wheels.${name}) releasableWheelNames ++ [ sdist ];
           };
         in
         {

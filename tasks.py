@@ -33,9 +33,13 @@ BUILD = (
     " python setup.py build_ext --inplace"
 )
 
+# -Werror is ours to opt into. setup.py leaves it off so that an sdist build on
+# someone else's compiler cannot fail on a warning nobody here has seen.
+STRICT_BUILD = {"SALIX_STRICT": "1"}
+
 NIX_INPUTS = ("src/", "nix/", "tools/", "tests/", "flake.nix", "flake.lock", "pyproject.toml")
 
-build = Task(BUILD, mutates=True)
+build = Task(BUILD, mutates=True, env=STRICT_BUILD)
 pytest = Task(PYTEST, env=ENVIRONMENT_PER_INTERPRETER)
 # --no-sync: analyze reaches this from ci, and CI never installs the project.
 compile_flags = Task("uv run --no-sync python tools/compile_flags.py", mutates=True)
@@ -134,14 +138,16 @@ FREE_THREADED = "3.14t"
 # so this one is kept in a root of its own where it cannot rebind the matrix.
 FREE_THREADED_ROOT = {"UV_PYTHON_INSTALL_DIR": ".free-threaded-python"}
 free_threaded_build = Task(
-    BUILD.format(PY=FREE_THREADED), mutates=True, env=FREE_THREADED_ROOT
+    BUILD.format(PY=FREE_THREADED), mutates=True, env=FREE_THREADED_ROOT | STRICT_BUILD
 )
 free_threaded_pytest = Task(
     PYTEST.format(PY=FREE_THREADED),
     env=FREE_THREADED_ROOT | {"UV_PROJECT_ENVIRONMENT": ".venvs/" + FREE_THREADED},
 )
 free_threaded = Sequential(free_threaded_build, free_threaded_pytest)
-benchmark = Sequential(Task("uv run python setup.py build_ext --inplace", mutates=True), bench)
+benchmark = Sequential(
+    Task("uv run python setup.py build_ext --inplace", mutates=True, env=STRICT_BUILD), bench
+)
 check = Parallel(test, free_threaded, format_check, lint, analyze, c_test, type_check)
 
 # Installed, not compiled: MSVC has no __attribute__((cleanup)), so the Windows
