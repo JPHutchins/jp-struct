@@ -39,31 +39,39 @@ jobs:
       # builds come from it -- an install_command could reach the python half of `camas check` and
       # none of the C half.
       use_setup_action: true
-      # FIRST RUN IS AUDIT. The extra_endpoints below are DERIVED, not observed: what salix's CI
-      # fetches, plus the hosts jphfmt's audit pass found for the same Nix-composite shape. Read this
-      # run's harden-runner insights, correct the list against what it actually saw, then switch to
-      # block -- until then the egress lock is not enforced and the canary is skipped.
-      egress_policy: audit
+      # Enforced, and the reusable workflow's canary now proves on every run that it engaged.
+      egress_policy: block
       # Single line per host, folded: the reusable workflow splices this value into harden-runner's
       # allowed-endpoints AFTER YAML parsing, so a '|' block scalar's newlines would reach the
       # endpoint parser verbatim and break it.
       #
-      # The Nix installer serves itself from install.determinate.systems;
-      # python-build-standalone ships as a GitHub release asset; the nixpkgs flake
-      # input arrives as a codeload tarball; cache.nixos.org is the substituter and tarballs.nixos.org
-      # its fixed-output mirror. crates.io is jphfmt: it is not in nixpkgs, so a cold store builds it
-      # from the crate and its vendored lock. pypi is uv resolving the dev group (camas).
+      # The first group is what run 30651665025's audit pass actually recorded a connection to, by the
+      # process that made it: install.determinate.systems (nix-installer, nix, determinate-nixd, node
+      # -- the installer serves itself), cache.nixos.org (nix), codeload.github.com (Runner.Worker,
+      # fetching this composite's own actions), releases.astral.sh (uv, fetching the interpreter the
+      # dev shell does not carry -- NOT a GitHub release asset, which is what the derived list guessed),
+      # files.pythonhosted.org (uv, the dev group's wheels).
+      #
+      # The second group is the cold-store class: unobserved because the run hit CI's 2.7GB store
+      # cache, and required the moment it misses -- which GitHub guarantees after 7 idle days, or any
+      # flake.lock change. tarballs.nixos.org is the fixed-output mirror; the crates hosts are jphfmt,
+      # which is not in nixpkgs and so gets built from the crate and its vendored lock; pypi.org is the
+      # index uv needs when the lock has to be re-resolved rather than replayed.
+      #
+      # Deliberately absent: raw.githubusercontent.com. The audit saw it, but from claude.exe and curl
+      # mid-review -- agent-initiated, not something the pipeline needs. Failing that closed is the
+      # entire point of locking the job that runs untrusted PR code.
       extra_endpoints: >-
         install.determinate.systems:443
-        release-assets.githubusercontent.com:443
-        codeload.github.com:443
         cache.nixos.org:443
+        codeload.github.com:443
+        releases.astral.sh:443
+        files.pythonhosted.org:443
         tarballs.nixos.org:443
         crates.io:443
         static.crates.io:443
         index.crates.io:443
         pypi.org:443
-        files.pythonhosted.org:443
       mechanic_time_limit: 3m
       mechanic_grace_period: 90s
       mechanic_usd_limit: "0.10"
