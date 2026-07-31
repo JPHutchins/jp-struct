@@ -97,12 +97,16 @@ def test_concurrent_set_field_on_a_shared_frozen_struct():
     """The write path the descriptor test above does not cover, and the one that
     used to take the interpreter with it: eight threads writing one slot with a
     plain load-store-decref release the same previous value twice.
+
+    The initial value is one element and every written one is two, so a
+    set_field that quietly stopped writing would fail the assertion rather than
+    pass on the value it started with.
     """
 
     class Holder(Struct):
         value: object
 
-    shared = Holder([0, 0])
+    shared = Holder([0])
 
     def work():
         for i in range(ITERATIONS):

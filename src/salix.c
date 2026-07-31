@@ -41,9 +41,8 @@ static PyObject * create_struct_base(void);
 /*
  * A type's field metadata is written once at class creation and then only
  * read. An instance's slots are written by the constructor before it returns,
- * and afterwards by exactly two paths -- the member descriptor and set_field --
- * both of which reach the slot through PyMember_SetOne, so a free-threaded
- * build's guarantees there are inherited rather than reimplemented.
+ * and afterwards only through PyMember_SetOne, so a free-threaded build's
+ * guarantees there are inherited rather than reimplemented.
  */
 static PyModuleDef_Slot struct_slots[] = {
 	{Py_mod_exec, struct_exec},

@@ -12,15 +12,6 @@ struct field_lookup {
 	Py_ssize_t index;
 };
 
-/* What type.__new__ makes a __slots__ entry. The Py_-prefixed spellings arrived
- * with 3.12; before that the name lives in structmember.h, which types.h pulls
- * in for exactly this reason. */
-#if PY_VERSION_HEX < 0x030C0000
-enum { SLOT_MEMBER_TYPE = T_OBJECT_EX };
-#else
-enum { SLOT_MEMBER_TYPE = Py_T_OBJECT_EX };
-#endif
-
 static void bind_positional(
 	StructType const * type,
 	PyObject * self,
@@ -281,8 +272,7 @@ PyObject * Struct_set_field(PyObject * const module, PyObject * const arguments)
  * the instance and defers the release past the end of it.
  *
  * The offset is the one type.__new__ gave this field, so the descriptor here
- * describes a slot that already exists; nothing is resolved by name, which is
- * the cost the alternative would have carried.
+ * describes a slot that already exists rather than looking one up.
  */
 static enum result write_slot(
 	StructType const * const type,
@@ -290,8 +280,15 @@ static enum result write_slot(
 	Py_ssize_t const index,
 	PyObject * const value
 ) {
+	char const * const name =
+		PyUnicode_AsUTF8(PyTuple_GET_ITEM(type->struct_field_names, index));
+
+	if (name == NULL) {
+		return RESULT_ERROR;
+	}
+
 	PyMemberDef slot = {
-		.name = "",
+		.name = name,
 		.type = SLOT_MEMBER_TYPE,
 		.offset = type->struct_slot_offsets[index],
 	};
