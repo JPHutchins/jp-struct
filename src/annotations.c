@@ -40,34 +40,45 @@ static PyObject * borrow_annotate(PyObject * const namespace) {
 	return annotate != NULL ? annotate : PyDict_GetItemString(namespace, "__annotate_func__");
 }
 
-/* annotationlib.Format.FORWARDREF: never raises NameError on an unresolved
- * bare forward reference, which is all we need since we only read the field
- * *names* and *order* here. Only annotationlib can deliver it -- a generated
- * __annotate__ implements VALUE and answers NotImplementedError to the rest --
- * so the call goes through the helper rather than the function itself.
+/*
+ * VALUE first, because it is what the generated __annotate__ implements
+ * directly and what all-resolvable annotations -- nearly all of them -- want.
+ * Only a name that does not resolve costs anything more.
  *
- * Chosen at compile time rather than probed at runtime. annotationlib is stdlib
- * from 3.14; below that, importing the name would find whatever a user happens
- * to have on sys.path and call a function of the same name on it. An older
- * interpreter has no PEP 649 either, so an __annotate__ in the namespace is one
- * the class body wrote, and VALUE is what calling it means. Where the module is
- * stdlib, a failure to import it is a broken interpreter and says so. */
+ * FORWARDREF is the fallback: it leaves an unresolved bare forward reference as
+ * a ForwardRef instead of raising, which is all we need since only the field
+ * *names* and *order* are read here. It has to come from annotationlib, since a
+ * generated __annotate__ answers NotImplementedError to every format but VALUE,
+ * and annotationlib is stdlib only from 3.14 -- below that there is no PEP 649
+ * either, so an __annotate__ in the namespace is one the class body wrote and
+ * VALUE is the whole story.
+ *
+ * The import is a plain path-based one and could in principle find a user
+ * module of that name; a checkout that shadows a stdlib module has larger
+ * problems, and the failure is loud rather than silent.
+ */
 static PyObject * evaluate(PyObject * const annotate) {
-#if PY_VERSION_HEX < 0x030E0000
-	return PyObject_CallFunction(annotate, "i", ANNOTATION_FORMAT_VALUE);
-#else
-	PY_OWNED(annotationlib, PyImport_ImportModule("annotationlib"));
+	PY_MOVABLE(resolved, PyObject_CallFunction(annotate, "i", ANNOTATION_FORMAT_VALUE));
 
-	if (annotationlib == NULL) {
-		return NULL;
+#if PY_VERSION_HEX >= 0x030E0000
+	if (resolved == NULL && PyErr_ExceptionMatches(PyExc_NameError)) {
+		PyErr_Clear();
+
+		PY_OWNED(annotationlib, PyImport_ImportModule("annotationlib"));
+
+		if (annotationlib == NULL) {
+			return NULL;
+		}
+
+		return PyObject_CallMethod(
+			annotationlib,
+			"call_annotate_function",
+			"Oi",
+			annotate,
+			ANNOTATION_FORMAT_FORWARDREF
+		);
 	}
-
-	return PyObject_CallMethod(
-		annotationlib,
-		"call_annotate_function",
-		"Oi",
-		annotate,
-		ANNOTATION_FORMAT_FORWARDREF
-	);
 #endif
+
+	return py_move(&resolved);
 }
