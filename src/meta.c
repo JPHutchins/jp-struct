@@ -544,11 +544,11 @@ static StructType * create_class(
  * _PyType_CalculateMetaclass, which is not in the public API, so it is written
  * out here rather than called.
  *
- * Only the winner is wanted, and only to decide who builds. Metatypes unrelated
- * to each other are a conflict rather than a winner, and returning the
- * requested one for that case hands type_new an argument it will reject with
- * the metaclass-conflict error it has always raised -- the one message a caller
- * already knows.
+ * Only the winner is wanted, and only to decide who builds, so a conflict needs
+ * no answer here -- whatever this returns, type_new recomputes the winner and
+ * raises the metaclass-conflict error it has always raised. For unrelated
+ * metatypes that is the first one this locked onto rather than the requested
+ * one, which is why the loop can stay this simple.
  */
 static PyTypeObject * winning_metatype(PyTypeObject * const requested, PyObject * const bases) {
 	PyTypeObject * winner = requested;

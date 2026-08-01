@@ -1,8 +1,10 @@
 """What the struct machinery does when handed something that is not a struct.
 
 `_StructMixin` is a permitted base and `StructMeta` is exported, so both are
-reachable without `Struct` anywhere in the bases. Everything asserted here used
-to be a segfault or a class that reported its fields and behaved like `object`.
+reachable without `Struct` anywhere in the bases. Most of what is asserted here
+used to be a segfault or a class that reported its fields and behaved like
+`object`; `TestTheUninstalledClassCannotBeBuilt` is the exception, pinning a
+CPython guard that salix relies on and never crashed without.
 
 The crashes cannot be asserted directly -- a segfault takes pytest with it -- so
 each one is pinned by the guarded outcome it now produces.
@@ -99,9 +101,10 @@ class TestTheUninstalledClassCannotBeBuilt:
     `tp_new` is not `type`'s, so `type.__new__` refuses to build one.
 
     That guard is load-bearing and it is CPython's, not salix's, so these pin it
-    on every supported version rather than trusting it. Without it, the class
-    would have NULL `struct_field_names` and `x == x` would reach
-    `PyObject_RichCompareBool(NULL, NULL, Py_EQ)`.
+    on every supported version rather than trusting it. What a class that got
+    past it would do to the guarded slots is not asserted here, because the
+    guard cannot be turned off to find out -- only that the invariant every one
+    of those slots reads holds.
     """
 
     @staticmethod
