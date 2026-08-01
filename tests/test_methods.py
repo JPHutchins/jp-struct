@@ -1,11 +1,14 @@
 """Methods on a struct, in the shapes people actually write them.
 
-A struct's body is an ordinary class body, and what it defines is kept -- with
-one exception, which is a name that collides with a field, where the slot
-descriptor wins. These are the codec-shaped methods that motivate reaching for a
-struct in the first place -- `to_bytes`, `to_string`, a `from_bytes` classmethod
--- plus the descriptors that sit alongside them, and the dunders that salix
-would otherwise generate.
+A struct's body is an ordinary class body, and the methods it defines are kept
+-- except a name that collides with a field, where the slot descriptor wins.
+These are the codec-shaped methods that motivate reaching for a struct in the
+first place -- `to_bytes`, `to_string`, a `from_bytes` classmethod -- plus the
+descriptors that sit alongside them, and the dunders that salix would otherwise
+generate.
+
+Methods are the subject; `__slots__` and `__match_args__` are salix's whatever
+the body says, and `TestBindingsSalixOwns` is where that is pinned.
 """
 
 import functools
@@ -84,8 +87,14 @@ class TestMethods:
         assert len(Frame(258, 7)) == 258
 
     def test_a_body_repr_and_init_displace_the_generated_ones(self):
-        """The claim in this file's docstring, made testable: the two dunders
-        salix would have written are the body's when the body writes them.
+        """Two different mechanisms reaching the same place. `__repr__` is a
+        dunder the mixin binds and the body's rebinding wins in the MRO;
+        `__init__` is not a dunder salix writes at all -- the constructor is a
+        vectorcall, and `defines_own_init` drops it for `PyType_GenericNew` when
+        the body defines one.
+
+        `set_field` rather than `self.x = ...` because the struct is frozen by
+        default, and the frozen wall does not open for its own `__init__`.
         """
 
         class Custom(Struct):
@@ -211,6 +220,40 @@ class TestCaching:
         assert instance.slow() == 200
         assert instance.slow() == 200
         assert len(calls) == 1
+
+
+class TestBindingsSalixOwns:
+    """Not every body binding is the body's to keep. These two are salix's
+    whatever the class writes, and neither collides with a field name.
+    """
+
+    def test_a_body_slots_is_replaced_by_the_fields(self):
+        class Slotted(Struct):
+            x: int
+            __slots__ = ("extra",)
+
+        assert Slotted.__slots__ == ("x",)
+
+    def test_a_body_match_args_is_replaced_by_the_fields(self):
+        class Matched(Struct):
+            x: int
+            __match_args__ = ("nope",)
+
+        assert Matched.__match_args__ == ("x",)
+
+    def test_a_body_init_cannot_assign_through_the_frozen_wall(self):
+        """The other half of what makes set_field the recipe: the natural
+        spelling is what a reader reaches for first, and it does not work.
+        """
+
+        class Assigning(Struct):
+            x: int
+
+            def __init__(self, x: int) -> None:
+                self.x = x
+
+        with pytest.raises(TypeError, match="does not support attribute assignment"):
+            Assigning(1)
 
 
 class TestNameCollisions:
