@@ -5,6 +5,7 @@ far as salix is concerned. PEP 649 is what makes that distinction reachable,
 and every test in the class below is a case where resolving would have failed.
 """
 
+import functools
 import sys
 
 import pytest
@@ -25,6 +26,66 @@ def test_a_hand_written_annotate_is_called_directly():
 
     assert Manual.__struct_fields__ == ("x", "y")
     assert Manual(1, 2).x == 1
+
+
+class TestANonFunctionAnnotate:
+    """annotationlib's FORWARDREF path rebuilds the callable from its
+    __globals__ and __code__, which only a plain function has. Anything else is
+    left unescalated so it raises what a plain function raises, rather than an
+    AttributeError about the missing attribute.
+    """
+
+    @staticmethod
+    def protocol_correct(format):
+        """PEP 649 says: implement VALUE, raise for the rest."""
+
+        if format != 1:
+            raise NotImplementedError
+
+        return {"x": Undefined}  # noqa: F821 -- unresolvable on purpose
+
+    @staticmethod
+    def wrapped_in_an_object(annotate):
+        class Wrapper:
+            def __call__(self, format):
+                return annotate(format)
+
+        return Wrapper()
+
+    @pytest.mark.parametrize("wrap", ["plain", "partial", "callable"])
+    def test_an_unresolvable_name_reports_itself_whatever_the_callable_is(self, wrap):
+        """A plain function reaches annotationlib and comes back with the
+        NameError; the other two are held back from it and raise the same thing
+        rather than an AttributeError about __globals__.
+        """
+
+        annotate = TestANonFunctionAnnotate.protocol_correct
+        wrapped = {
+            "plain": annotate,
+            "partial": functools.partial(annotate),
+            "callable": TestANonFunctionAnnotate.wrapped_in_an_object(annotate),
+        }[wrap]
+
+        with pytest.raises(NameError, match="Undefined"):
+            type(Struct)("Wrapped", (Struct,), {"__annotate__": wrapped})
+
+    def test_a_callable_object_is_accepted_when_its_names_resolve(self):
+        class Annotate:
+            def __call__(self, format):
+                return {"x": int, "y": int}
+
+        Built = type(Struct)("Built", (Struct,), {"__annotate__": Annotate()})
+
+        assert Built.__struct_fields__ == ("x", "y")
+        assert Built(1, 2).y == 2
+
+    def test_a_partial_is_accepted_when_its_names_resolve(self):
+        def annotate(format):
+            return {"z": int}
+
+        Built = type(Struct)("Built", (Struct,), {"__annotate__": functools.partial(annotate)})
+
+        assert Built.__struct_fields__ == ("z",)
 
 
 @pytest.mark.skipif(
