@@ -129,8 +129,13 @@ class TestMutableDefaults:
 
         assert second.xs == []
 
-    @pytest.mark.parametrize("factory", [dict, set, bytearray])
+    @pytest.mark.parametrize("factory", [dict, set, bytearray], ids=["dict", "set", "bytearray"])
     def test_the_other_mutable_builtins_are_copied_too(self, factory):
+        """`list` has its own test above; these are the rest of the four that
+        `struct_copies_default` names. test_field_values.py's COPIED_WHEN_EMPTY
+        is the list both files derive from.
+        """
+
         class Holder(Struct):
             v: object = factory()
 
@@ -141,15 +146,16 @@ class TestMutableDefaults:
         literals: a small int and an interned literal are shared by CPython
         whatever salix does, so asserting identity on those proves nothing.
 
-        `"not interned " * 2` is not enough -- the peephole optimiser folds it
-        to one constant and two evaluations give the same object, which is the
-        trap this docstring named and the code then fell into. `str.join` runs.
+        Neither `"not interned " * 2` nor `10**20` is enough -- the peephole
+        optimiser folds both, which is the trap this docstring named and the
+        code then fell into twice. `str.join` and `+ 0` survive compilation;
+        `int(n)` would not, since it returns the argument for an int.
         """
 
         class Inner(Struct):
             a: int
 
-        uncached_number = 10**20
+        uncached_number = 10**20 + 0  # the add is what survives constant folding
         uncached_text = "".join(["not ", "interned"])  # noqa: FLY002 -- see above
 
         class Holder(Struct):
@@ -186,7 +192,9 @@ class TestMutableDefaults:
 
     def test_construction_and_inheritance_agree_after_that_mutation(self):
         """One copies and one refuses, so they have to be looking at the same
-        thing: the stored default, which nothing outside the class can fill.
+        thing -- the stored default, which the module-level alias no longer
+        reaches. `__struct_defaults__` still hands it out and #51 is where that
+        route is argued; what this pins is that the two agree.
         """
 
         shared = []
