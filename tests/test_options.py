@@ -151,6 +151,26 @@ class TestEq:
 
         assert Frozen.__hash__ is None
 
+    def test_a_subclass_inherits_the_hash_beside_the_eq_it_inherits(self):
+        """When the body defined both, the pair travels together. salix binding
+        its own structural hash here would break a contract the base kept.
+        """
+
+        class Both(Struct):
+            x: object
+
+            def __eq__(self, other: object) -> bool:
+                return True
+
+            def __hash__(self) -> int:
+                return 42
+
+        class Child(Both):
+            y: object = 0
+
+        assert hash(Child(1, 0)) == 42
+        assert len({Child(1, 0), Child(2, 0)}) == 1
+
     def test_a_subclass_may_take_equality_back_and_become_hashable(self):
         class Custom(Struct):  # noqa: PLW1641 -- eq=False below is the replacement
             x: object
