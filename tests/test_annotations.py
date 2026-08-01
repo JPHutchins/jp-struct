@@ -54,12 +54,14 @@ class TestANonFunctionAnnotate:
 
     @pytest.mark.parametrize("wrap", ["plain", "partial", "callable"])
     def test_an_unresolvable_name_reports_itself_whatever_the_callable_is(self, wrap):
-        """On 3.14+ a plain function reaches annotationlib and comes back with
-        the NameError, while the other two are held back from it and raise the
-        same thing rather than an AttributeError about __globals__. Below 3.14
-        the escalation is compiled out and all three propagate it directly, so
-        the assertion holds everywhere and only the plain case exercises the
-        guard.
+        """All three surface the NameError rather than an AttributeError about
+        __globals__, which is what the PyFunction_Check guard is for.
+
+        What this cannot detect is the escalation being deleted: a
+        protocol-correct annotate refuses VALUE_WITH_FAKE_GLOBALS too, so
+        annotationlib falls back to a real-globals VALUE re-run and raises the
+        same NameError the direct call would have. TestForwardReferences is
+        where the escalation has to exist for the class to build at all.
         """
 
         annotate = TestANonFunctionAnnotate.protocol_correct
@@ -81,6 +83,22 @@ class TestANonFunctionAnnotate:
 
         assert Built.__struct_fields__ == ("x", "y")
         assert Built(1, 2).y == 2
+
+    def test_an_annotate_that_refuses_VALUE_is_refused_back(self):
+        """PEP 649 makes VALUE the one format an __annotate__ must implement,
+        and salix asks for it first. An older flow tried another format first
+        and fell back, so an annotate implementing only that one built its
+        class; it does not any more, and this is the shape that changed.
+        """
+
+        def inverted(format):
+            if format == 1:
+                raise NotImplementedError
+
+            return {"x": int}
+
+        with pytest.raises(NotImplementedError):
+            type(Struct)("Inverted", (Struct,), {"__annotate__": inverted})
 
     def test_a_partial_is_accepted_when_its_names_resolve(self):
         def annotate(format):
@@ -153,6 +171,35 @@ class TestForwardReferences:
 
             class Broken(Struct):
                 x: 1 / 0
+
+    def test_a_second_bad_annotation_does_not_bury_the_first(self):
+        """The escalation re-evaluates every annotation, so a later one that
+        fails for its own reasons raises during the rescue of the earlier one.
+        The name that did not resolve is what the reader needs.
+        """
+
+        with pytest.raises(NameError, match="Missing") as raised:
+
+            class Broken(Struct):
+                x: Missing  # noqa: F821
+                y: 1 / 0
+
+        assert isinstance(raised.value.__context__, ZeroDivisionError)
+
+    def test_a_NameError_from_inside_a_called_function_still_defers(self):
+        """`.name` is filled in wherever the lookup failed, including inside a
+        callee, so a buggy helper reads as a forward reference and the class
+        builds. Plain 3.14 defers this too -- the divergence is the explicit
+        `raise NameError`, which salix propagates and CPython would defer.
+        """
+
+        def helper():
+            return undefined_inside  # noqa: F821
+
+        class Deferred(Struct):
+            x: helper()
+
+        assert Deferred.__struct_fields__ == ("x",)
 
     def test_a_raised_NameError_is_arbitrary_failure_too(self):
         """The exemption is the interpreter's failure to find a name, not the

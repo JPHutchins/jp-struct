@@ -59,11 +59,18 @@ static PyObject * borrow_annotate(PyObject * const namespace) {
  *
  * The import is a plain path-based one and could in principle find a user
  * module of that name; a checkout that shadows a stdlib module has larger
- * problems, and the NameError it displaces is put back as the raised one with
- * the import failure behind it, so neither is lost.
+ * problems. Whichever half of the escalation fails, the NameError it displaced
+ * is put back as the raised one with that failure behind it as __context__, so
+ * the name that did not resolve is never the thing that gets lost.
  */
 static PyObject * evaluate(PyObject * const annotate) {
-	PY_MOVABLE(resolved, PyObject_CallFunction(annotate, "i", ANNOTATION_FORMAT_VALUE));
+	PY_OWNED(format, PyLong_FromLong(ANNOTATION_FORMAT_VALUE));
+
+	if (format == NULL) {
+		return NULL;
+	}
+
+	PY_MOVABLE(resolved, PyObject_CallOneArg(annotate, format));
 
 #if PY_VERSION_HEX >= 0x030E0000
 	/* Only a plain function: annotationlib's FORWARDREF path rebuilds the
@@ -80,17 +87,25 @@ static PyObject * evaluate(PyObject * const annotate) {
 			 * every ForwardRef unowned and class-scope resolution is off the
 			 * table. Only the keys are read here, so nothing depends on it. */
 			PY_OWNED(annotationlib, PyImport_ImportModule("annotationlib"));
+			PY_MOVABLE(
+				escalated,
+				annotationlib == NULL ? NULL :
+					PyObject_CallMethod(
+						annotationlib,
+						"call_annotate_function",
+						"Oi",
+						annotate,
+						ANNOTATION_FORMAT_FORWARDREF
+					)
+			);
 
-			if (annotationlib != NULL) {
-				return PyObject_CallMethod(
-					annotationlib,
-					"call_annotate_function",
-					"Oi",
-					annotate,
-					ANNOTATION_FORMAT_FORWARDREF
-				);
+			if (escalated != NULL) {
+				return py_move(&escalated);
 			}
 
+			/* Either half can fail, and both bury the same thing. A second bad
+			 * annotation makes the re-evaluation raise for its own reasons, and
+			 * that error says nothing about the name this started with. */
 			PyException_SetContext(unresolved, PyErr_GetRaisedException());
 		}
 
@@ -111,14 +126,16 @@ static PyObject * evaluate(PyObject * const annotate) {
  * failed, and leaves it None for an explicit ``raise NameError(...)``.
  */
 static bool names_an_unresolved_symbol(PyObject * const error) {
-	PY_OWNED(name, PyObject_GetAttrString(error, "name"));
+	PyObject * found = NULL;
 
-	if (name == NULL) {
+	if (PyObject_GetOptionalAttrString(error, "name", &found) < 0) {
 		PyErr_Clear();
 
 		return false;
 	}
 
-	return !Py_IsNone(name);
+	PY_OWNED(name, found);
+
+	return name != NULL && !Py_IsNone(name);
 }
 #endif
