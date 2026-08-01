@@ -56,7 +56,12 @@ class Frame(Struct):
 
 class TestMethods:
     def test_an_instance_method_reads_the_fields(self):
-        assert Frame(258, 7, 1).to_bytes() == HEADER.pack(258, 7, 1)
+        """The expected bytes written out rather than re-derived from `to_bytes`'
+        own expression, so the assertion depends on the field values reaching
+        the method in the right order and not merely on reaching it.
+        """
+
+        assert Frame(258, 7, 1).to_bytes() == b"\x02\x01\x07\x01"
 
     def test_a_second_instance_method_is_not_displaced_by_the_first(self):
         assert Frame(258, 7, 1).to_string() == "07:0102:01"
@@ -76,8 +81,12 @@ class TestMethods:
         assert Frame.empty() == Frame(0, 0, 0)
 
     def test_a_staticmethod_needs_no_instance(self):
-        assert Frame.header_size() == HEADER.size
-        assert Frame(1, 1).header_size() == HEADER.size
+        """`<HBB` is four bytes; comparing against HEADER.size would compare the
+        method's own return value with itself.
+        """
+
+        assert Frame.header_size() == 4
+        assert Frame(1, 1).header_size() == 4
 
     def test_a_property_reads_the_fields(self):
         assert Frame(0, 0).is_empty
@@ -184,6 +193,10 @@ class TestCaching:
         through `object.__setattr__` when it is frozen. What set_field buys is
         that it is the supported path rather than an escape hatch around the
         class's own rules.
+
+        test_post_init.py pins the mechanism; what is here is the caching claim
+        -- that the value is computed once, at construction, and read from a
+        slot afterwards.
         """
 
         calls = []
@@ -222,6 +235,29 @@ class TestCaching:
         assert instance.slow() == 200
         assert len(calls) == 1
 
+    def test_that_cache_is_shared_by_every_equal_instance(self):
+        """The entry is keyed by `self`, and a struct hashes by field values, so
+        two structs that compare equal are one key. Right for a pure function of
+        the fields, and wrong the moment the method reads anything else.
+        """
+
+        calls = []
+
+        class Computed(Struct):
+            x: int
+
+            @functools.cache  # noqa: B019 -- the lifetime cost is the point
+            def slow(self) -> int:
+                calls.append(1)
+                return self.x * 100
+
+        first, second = Computed(2), Computed(2)
+
+        assert first is not second
+        assert first.slow() == 200
+        assert second.slow() == 200
+        assert len(calls) == 1
+
 
 class TestBindingsSalixOwns:
     """Not every body binding is the body's to keep. These two are salix's
@@ -244,30 +280,50 @@ class TestBindingsSalixOwns:
 
 
 class TestNameCollisions:
-    def test_a_method_named_after_a_field_is_dropped(self):
-        """The slot descriptor wins and the method is discarded, as it is for
-        `dataclass(slots=True)` (a member_descriptor) and NamedTuple (a
-        _tuplegetter).
+    """A method named after a field is not discarded -- it becomes that field's
+    default, which is worse. `append_declared` reads the class-body value bound
+    to the field name, and a `def` is a class-body value bound to a name.
 
-        A plain dataclass is the odd one out and the worse of the two: nothing
-        replaces the function, so it is read as the field's *default* and
-        `DC()` constructs an instance whose x is the method.
+    So the class builds, `Collide.x` is the slot descriptor, and `Collide()`
+    hands back an instance whose int field holds a function. #54 is the issue.
+    """
+
+    def test_the_method_is_gone_from_the_class(self):
+        class Collide(Struct):
+            x: int
+
+            def x(self) -> str:
+                return "method"
+
+        assert type(Collide.x).__name__ == "member_descriptor"
+        assert Collide(1).x == 1
+
+    def test_but_it_became_the_default_and_the_class_is_constructible(self):
+        """The half `Collide(1).x == 1` cannot see. Constructing with no
+        argument is accepted, because the field now has a default.
         """
 
         class Collide(Struct):
             x: int
 
-            def x(self) -> str:  # type: ignore[no-redef]
+            def x(self) -> str:
                 return "method"
 
-        assert Collide(1).x == 1
+        (default,) = Collide.__struct_defaults__
 
-    def test_a_property_named_after_a_field_is_dropped_too(self):
-        class Collide(Struct):
+        assert callable(default)
+        assert Collide().x is default
+
+    def test_a_property_collides_the_same_way(self):
+        class CollideProp(Struct):
             y: int
 
             @property
-            def y(self) -> str:  # type: ignore[no-redef]
+            def y(self) -> str:
                 return "property"
 
-        assert Collide(1).y == 1
+        (default,) = CollideProp.__struct_defaults__
+
+        assert isinstance(default, property)
+        assert CollideProp().y is default
+        assert CollideProp(1).y == 1
