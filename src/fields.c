@@ -7,6 +7,12 @@
 #include "result.h"
 #include "types.h"
 
+enum inheritance : int {
+	INHERITANCE_ERROR = -1,
+	INHERITANCE_NEW = 0,
+	INHERITANCE_INHERITED = 1,
+};
+
 static enum result append_inherited(
 	StructType const * base,
 	PyObject * all_names,
@@ -22,7 +28,7 @@ static enum result append_declared(
 );
 static PyObject * build_defaults(PyObject * all_names, PyObject * default_by_name);
 static PyObject * checked_annotations(PyObject * namespace);
-static bool inherits_field(StructType const * base, PyObject * field_name);
+static enum inheritance inherits_field(StructType const * base, PyObject * field_name);
 
 /* The plan only takes references once every step has succeeded; the working
  * collections belong to this scope either way. */
@@ -142,8 +148,13 @@ static enum result append_declared(
 
 		/* Skip if this name was already inherited (override of annotation, not
 		 * a new slot). */
-		if (inherits_field(base, field_name)) {
-			continue;
+		switch (inherits_field(base, field_name)) {
+			case INHERITANCE_ERROR:
+				return RESULT_ERROR;
+			case INHERITANCE_INHERITED:
+				continue;
+			case INHERITANCE_NEW:
+				break;
 		}
 
 		if (PyList_Append(all_names, field_name) < 0 || PyList_Append(new_names, field_name) < 0) {
@@ -154,16 +165,26 @@ static enum result append_declared(
 	return RESULT_OK;
 }
 
-static bool inherits_field(StructType const * const base, PyObject * const field_name) {
+/* PyObject_RichCompareBool answers -1 for an error and nothing else, so the
+ * three cases are the return value itself -- no PyErr_Occurred() to tell a
+ * failure apart from a "less than", and so no invariant about the exception
+ * state on entry. The same tri-state compare.c reads into `enum comparison`. */
+static enum inheritance inherits_field(StructType const * const base, PyObject * const field_name) {
 	Py_ssize_t const inherited_count = base != NULL ? base->struct_field_count : 0;
 
 	for (Py_ssize_t i = 0; i < inherited_count; ++i) {
-		if (PyUnicode_Compare(field_name, PyTuple_GET_ITEM(base->struct_field_names, i)) == 0) {
-			return true;
+		enum inheritance const inherited = PyObject_RichCompareBool(
+			field_name,
+			PyTuple_GET_ITEM(base->struct_field_names, i),
+			Py_EQ
+		);
+
+		if (inherited != INHERITANCE_NEW) {
+			return inherited;
 		}
 	}
 
-	return false;
+	return INHERITANCE_NEW;
 }
 
 /* Build the defaults tuple as the trailing run of defaulted fields, and

@@ -46,6 +46,31 @@ def test_a_subclass_may_give_an_inherited_field_a_default():
     assert Defaulted(1).__struct_fields__ == ("x", "y")
 
 
+def test_a_redefaulted_inherited_field_is_not_shadowed_by_its_class_variable():
+    class Defaulted(Base):
+        y: int = 5
+
+    instance = Defaulted(1, 9)
+
+    assert instance.y == 9
+    assert repr(instance) == "Defaulted(x=1, y=9)"
+
+
+def test_a_bare_binding_over_an_inherited_field_is_not_shadowed_either():
+    """The same shadowing, reached without re-annotating: a class variable whose
+    name is already a field would otherwise sit ahead of the base's descriptor
+    in the MRO, and attribute access alone would disagree with everything else.
+    """
+
+    class Bound(Base):
+        y = 42
+
+    instance = Bound(1, 9)
+
+    assert instance.y == 9
+    assert repr(instance) == "Bound(x=1, y=9)"
+
+
 def test_a_required_field_may_not_follow_a_defaulted_one():
     with pytest.raises(TypeError, match="non-default field 'b' follows a field with a default"):
 

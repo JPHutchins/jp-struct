@@ -28,24 +28,33 @@ static void StructMeta_dealloc(PyObject * self);
 
 static StructType * find_struct_base(PyObject * bases);
 static bool has_weakref_slot(StructType const * base);
+static struct options base_options(StructType const * base);
 static PyObject * build_class_namespace(
 	PyObject * original_namespace,
 	PyObject * all_names,
 	PyObject * new_names,
 	struct options options,
-	struct options inherited,
-	bool base_has_weakref
+	StructType const * base,
+	bool body_defines_eq,
+	bool inherits_body_eq
 );
 static PyObject * build_slots(PyObject * new_names, bool weakref);
 static enum result set_match_args(PyObject * namespace, PyObject * all_names, bool wanted);
 static enum result apply_options(
 	PyObject * namespace,
 	struct options options,
-	struct options inherited
+	struct options inherited,
+	bool body_defines_eq,
+	bool inherits_body_eq
 );
 static enum result rebind(PyObject * namespace, char const * const * names, bool from_mixin);
-static enum result bind_hash(PyObject * namespace, struct options options);
-static enum result drop_class_variables(PyObject * namespace, PyObject * new_names);
+static enum result bind_hash(
+	PyObject * namespace,
+	struct options options,
+	bool body_defines_eq,
+	bool inherits_body_eq
+);
+static enum result drop_class_variables(PyObject * namespace, PyObject * all_names);
 static StructType * create_class(
 	PyTypeObject * metatype,
 	PyObject * name,
@@ -56,7 +65,8 @@ static enum result install_fields(
 	StructType * struct_class,
 	StructType const * base,
 	struct field_plan const * plan,
-	struct options options
+	struct options options,
+	bool resolves_body_eq
 );
 static enum result install_post_init(StructType * struct_class);
 static bool defines_own_init(StructType const * struct_class);
@@ -152,7 +162,7 @@ PyObject * StructMeta_new(
 	}
 
 	StructType const * const base = find_struct_base(bases);
-	struct options const inherited = base != NULL ? base->struct_options : options_initial();
+	struct options const inherited = base_options(base);
 	struct options_request const request =
 		options_read(keywords, inherited, base != NULL && base->struct_field_count > 0);
 
@@ -166,6 +176,16 @@ PyObject * StructMeta_new(
 		return NULL;
 	}
 
+	/* Read before build_class_namespace rebinds anything: afterwards every
+	 * comparison name is present whether the body wrote one or salix did. An
+	 * inherited one survives only if this body leaves equality alone. */
+	bool const body_defines_eq = PyDict_GetItemString(original_namespace, "__eq__") != NULL;
+	bool const inherits_body_eq = (
+		base != NULL &&
+		base->struct_resolves_body_eq &&
+		request.options.eq == inherited.eq
+	);
+
 	PY_OWNED(
 		namespace,
 		build_class_namespace(
@@ -173,8 +193,9 @@ PyObject * StructMeta_new(
 			plan.all_names,
 			plan.new_names,
 			request.options,
-			inherited,
-			has_weakref_slot(base)
+			base,
+			body_defines_eq,
+			inherits_body_eq
 		)
 	);
 	StructType * struct_class = (
@@ -184,7 +205,14 @@ PyObject * StructMeta_new(
 
 	if (
 		struct_class != NULL &&
-		install_fields(struct_class, base, &plan, request.options) != RESULT_OK
+		install_fields(
+				struct_class,
+				base,
+				&plan,
+				request.options,
+				body_defines_eq || inherits_body_eq
+			) !=
+			RESULT_OK
 	) {
 		Py_CLEAR(struct_class);
 	}
@@ -208,33 +236,48 @@ static StructType * find_struct_base(PyObject * const bases) {
 	return NULL;
 }
 
+/* What a subclass starts from: the base's options, or the defaults when there
+ * is no struct base to inherit from. */
+static struct options base_options(StructType const * const base) {
+	return base != NULL ? base->struct_options : options_initial();
+}
+
 /* CPython refuses a second __weakref__ in a subclass, so an inherited one is
  * what `weakref=True` already got. */
 static bool has_weakref_slot(StructType const * const base) {
 	return base != NULL && base->heap_type.ht_type.tp_weaklistoffset != 0;
 }
 
-/* The namespace handed to type.__new__: a copy of the original with the
- * default-bearing field names removed (so __slots__ won't clash with a class
- * variable) plus __slots__ / __match_args__ and whatever the options replace. */
+/* The namespace handed to type.__new__: a copy of the original with every
+ * class-body binding of a field name removed (so none of them clashes with the
+ * __slots__ descriptor that reads the value) plus __slots__ / __match_args__
+ * and whatever the options replace. */
 static PyObject * build_class_namespace(
 	PyObject * const original_namespace,
 	PyObject * const all_names,
 	PyObject * const new_names,
 	struct options const options,
-	struct options const inherited,
-	bool const base_has_weakref
+	StructType const * const base,
+	bool const body_defines_eq,
+	bool const inherits_body_eq
 ) {
-	PY_OWNED(slots, build_slots(new_names, options.weakref && !base_has_weakref));
+	PY_OWNED(slots, build_slots(new_names, options.weakref && !has_weakref_slot(base)));
 	PY_MOVABLE(namespace, PyDict_Copy(original_namespace));
 
 	if (
 		slots != NULL &&
 		namespace != NULL &&
-		drop_class_variables(namespace, new_names) == RESULT_OK &&
+		drop_class_variables(namespace, all_names) == RESULT_OK &&
 		PyDict_SetItemString(namespace, "__slots__", slots) == 0 &&
 		set_match_args(namespace, all_names, options.match_args) == RESULT_OK &&
-		apply_options(namespace, options, inherited) == RESULT_OK
+		apply_options(
+				namespace,
+				options,
+				base_options(base),
+				body_defines_eq,
+				inherits_body_eq
+			) ==
+			RESULT_OK
 	) {
 		return py_move(&namespace);
 	}
@@ -299,7 +342,9 @@ static enum result set_match_args(
 static enum result apply_options(
 	PyObject * const namespace,
 	struct options const options,
-	struct options const inherited
+	struct options const inherited,
+	bool const body_defines_eq,
+	bool const inherits_body_eq
 ) {
 	/* All six, not just __eq__: they share tp_richcompare, and a class that
 	 * rebinds only some of them gets the dispatching slot with the other source
@@ -334,7 +379,7 @@ static enum result apply_options(
 		return RESULT_ERROR;
 	}
 
-	return bind_hash(namespace, options);
+	return bind_hash(namespace, options, body_defines_eq, inherits_body_eq);
 }
 
 /* A name the class body defined is neither source's to take. */
@@ -370,12 +415,26 @@ static enum result rebind(
  * can still move -- a key whose hash moves is not a key. Settled outright
  * rather than on a transition, because it is the one name two options answer.
  */
-static enum result bind_hash(PyObject * const namespace, struct options const options) {
+static enum result bind_hash(
+	PyObject * const namespace,
+	struct options const options,
+	bool const body_defines_eq,
+	bool const inherits_body_eq
+) {
 	if (PyDict_GetItemString(namespace, "__hash__") != NULL) {
 		return RESULT_OK;
 	}
 
-	if (options.eq && !options.frozen) {
+	/* An __eq__ that came from a class body is not salix's to answer for, and
+	 * neither is the hash beside it: whatever the MRO carries -- None from
+	 * Python's own rule, or a __hash__ that same body wrote -- is already
+	 * right, and binding one here would replace it. */
+	if (inherits_body_eq) {
+		return RESULT_OK;
+	}
+
+	/* Python's rule: a body that defines __eq__ and not __hash__ is unhashable. */
+	if (body_defines_eq || (options.eq && !options.frozen)) {
 		return PyDict_SetItemString(namespace, "__hash__", Py_None) == 0 ? RESULT_OK : RESULT_ERROR;
 	}
 
@@ -384,16 +443,15 @@ static enum result bind_hash(PyObject * const namespace, struct options const op
 	return rebind(namespace, hash_name, options.eq);
 }
 
-/* A field with a default is bound in the class body, where it would collide
- * with the __slots__ descriptor of the same name. */
-static enum result drop_class_variables(PyObject * const namespace, PyObject * const new_names) {
-	for (Py_ssize_t i = 0; i < PyList_GET_SIZE(new_names); ++i) {
-		PyObject * const field_name = PyList_GET_ITEM(new_names, i);
+/* Any class-body binding of a field name -- an annotated default, or a bare
+ * assignment over a name the base already declared -- would sit in this class's
+ * dict ahead of the __slots__ descriptor that reads the value. */
+static enum result drop_class_variables(PyObject * const namespace, PyObject * const all_names) {
+	for (Py_ssize_t i = 0; i < PyList_GET_SIZE(all_names); ++i) {
+		PyObject * const field_name = PyList_GET_ITEM(all_names, i);
+		int const present = PyDict_Contains(namespace, field_name);
 
-		if (
-			PyDict_Contains(namespace, field_name) == 1 &&
-			PyDict_DelItem(namespace, field_name) < 0
-		) {
+		if (present < 0 || (present == 1 && PyDict_DelItem(namespace, field_name) < 0)) {
 			return RESULT_ERROR;
 		}
 	}
@@ -421,7 +479,8 @@ static enum result install_fields(
 	StructType * const struct_class,
 	StructType const * const base,
 	struct field_plan const * const plan,
-	struct options const options
+	struct options const options,
+	bool const resolves_body_eq
 ) {
 	PY_MOVABLE(field_names, PyList_AsTuple(plan->all_names));
 
@@ -443,6 +502,7 @@ static enum result install_fields(
 	struct_class->struct_field_count = field_count;
 	struct_class->struct_default_count = PyTuple_GET_SIZE(plan->defaults);
 	struct_class->struct_options = options;
+	struct_class->struct_resolves_body_eq = resolves_body_eq;
 
 	/* The mixin has no tp_new, because nothing ever needed one: the vectorcall
 	 * allocates. A class that declined it needs the generic one to get as far

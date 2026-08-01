@@ -32,6 +32,12 @@ typedef struct {
 
 	/* What the class body asked for, and what a subclass inherits */
 	struct options struct_options;
+
+	/* Whether this class resolves an __eq__ that came from a class body rather
+	 * than from salix. Answered once, here, because a subclass needs it and
+	 * cannot re-derive it: `__hash__ is None` on the base does not say which
+	 * rule put it there. */
+	bool struct_resolves_body_eq;
 } StructType;
 
 static inline StructType * struct_type_of(PyObject * const self) {
