@@ -40,8 +40,10 @@ jobs:
       # builds come from it -- an install_command could reach the python half of `camas check` and
       # none of the C half.
       use_setup_action: true
-      # Enforced, and the reusable workflow's canary now proves on every run that it engaged.
-      egress_policy: block
+      # TEMPORARY (#107 diagnostic, JP-approved): audit isolates whether harden-runner's BLOCK mechanism
+      # is what makes the runner receive a "shutdown signal" mid-review. If evictions stop under audit,
+      # the block is the cause. REVERT to block once the test concludes. salix PRs are our own agents.
+      egress_policy: audit
       # Single line per host, folded: the reusable workflow splices this value into harden-runner's
       # allowed-endpoints AFTER YAML parsing, so a '|' block scalar's newlines would reach the
       # endpoint parser verbatim and break it.
