@@ -264,12 +264,15 @@ static PyObject * build_defaults(PyObject * const all_names, PyObject * const de
 		 * a set, whose copy hashes every element, which is user code running at
 		 * class definition on the way to an error.
 		 *
-		 * The second read is the one that counts, and it is the one whose answer
-		 * is permanent: it reads the copy, which is what the class keeps and
-		 * which nothing else can fill. A racing write is still captured by the
-		 * copy -- the copy is made from the declaration, so of course it is --
-		 * and the class refuses it. What the race costs is the work the first
-		 * check exists to skip, not a non-empty stored default. */
+		 * The second read is the one that counts, because it reads the copy --
+		 * what the class keeps, and what no module-level alias still points at.
+		 * A racing write is captured by the copy (the copy is made from the
+		 * declaration, so of course it is) and refused there, so the race costs
+		 * the work the first check exists to skip and not the invariant.
+		 *
+		 * `__struct_defaults__` still hands the stored object out, so filling it
+		 * through there defeats this. That route is out of contract and #51 is
+		 * where the whole type list is argued. */
 		if (reject_unsafe_default(field_name, value) != RESULT_OK) {
 			Py_DECREF(defaults);
 

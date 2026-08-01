@@ -137,16 +137,20 @@ class TestMutableDefaults:
         assert Holder().v is not Holder().v
 
     def test_an_immutable_default_is_shared(self):
-        """The int and the str are built rather than written as literals: a
-        small int and an interned literal are shared by CPython whatever salix
-        does, so asserting identity on those proves nothing.
+        """The int and the str are built at runtime rather than written as
+        literals: a small int and an interned literal are shared by CPython
+        whatever salix does, so asserting identity on those proves nothing.
+
+        `"not interned " * 2` is not enough -- the peephole optimiser folds it
+        to one constant and two evaluations give the same object, which is the
+        trap this docstring named and the code then fell into. `str.join` runs.
         """
 
         class Inner(Struct):
             a: int
 
         uncached_number = 10**20
-        uncached_text = "not interned " * 2
+        uncached_text = "".join(["not ", "interned"])  # noqa: FLY002 -- see above
 
         class Holder(Struct):
             number: int = uncached_number

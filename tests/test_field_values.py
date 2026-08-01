@@ -48,12 +48,19 @@ def test_a_value_may_be_a_default(value):
     class Local(Struct):
         field: object = value
 
+    (stored,) = Local.__struct_defaults__
+
     assert Local().field == value
-    assert Local().__struct_defaults__ == (value,)
+    assert stored == value
 
     if type(value) in COPIED_WHEN_EMPTY:
-        assert Local().field is not value
+        # Two copies, not one: the class keeps its own, severed from whatever
+        # the body named, and each instance keeps one severed from the class's.
+        assert stored is not value
+        assert Local().field is not stored
+        assert Local().field is not Local().field
     else:
+        assert stored is value
         assert Local().field is value
 
 

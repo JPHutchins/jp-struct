@@ -252,7 +252,14 @@ PyObject * struct_default_copy(PyObject * const declared) {
 		return PySet_New(declared);
 	}
 
-	return PyByteArray_FromObject(declared);
+	if (kind == &PyByteArray_Type) {
+		return PyByteArray_FromObject(declared);
+	}
+
+	/* Unreachable while struct_copies_default names these four and no more. If
+	 * that stops being true, sharing is the answer that degrades: copying with
+	 * the wrong constructor would change the value's type. */
+	return Py_NewRef(declared);
 }
 
 /*
