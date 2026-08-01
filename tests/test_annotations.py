@@ -118,6 +118,30 @@ class TestANonFunctionAnnotate:
         assert Built.__struct_fields__ == ("x", "y")
         assert Built(1, 2).y == 2
 
+    @pytest.mark.skipif(
+        sys.version_info < (3, 14),
+        reason="the escalation this describes is compiled out before 3.14",
+    )
+    def test_the_escalation_answers_with_what_forwardref_returned(self):
+        """A hand-written annotate that answers different keys for the two
+        formats gets the FORWARDREF ones, because that is the call that
+        succeeded -- there is no VALUE dict to prefer, only the NameError it
+        raised.
+
+        Diffing the two would mean asking twice on every rescue to catch an
+        annotate that contradicts itself. Recorded rather than guarded.
+        """
+
+        def inconsistent(format):
+            if format == 1:
+                raise NameError("nope", name="nope")
+
+            return {"only_this": int}
+
+        Built = type(Struct)("Built", (Struct,), {"__annotate__": inconsistent})
+
+        assert Built.__struct_fields__ == ("only_this",)
+
     def test_an_annotate_that_refuses_VALUE_is_refused_back(self):
         """PEP 649 makes VALUE the one format an __annotate__ must implement,
         and salix asks for it first. An older flow tried another format first

@@ -53,8 +53,10 @@ static PyObject * borrow_annotate(PyObject * const namespace) {
  * The rescue costs a re-evaluation, and sometimes two: annotationlib rebuilds
  * the callable and re-runs every annotation in the dict, so a class holding one
  * forward reference evaluates its other annotations again. Plain 3.14 evaluates
- * once and defers. Format.STRING would avoid it -- only the keys are read here
- * -- but the values stop being objects, and #14's ClassVar check reads them.
+ * once and defers. Format.STRING would avoid it, because only the keys are read
+ * here -- but not for long: #50 adds the #14 ClassVar check, which reads the
+ * values, and STRING hands it strings. Not in this tree yet, so the reason to
+ * keep FORWARDREF is a pending one rather than a present one.
  *
  * FORWARDREF is the fallback: it leaves an unresolved bare forward reference as
  * a ForwardRef instead of raising, which is all we need since only the field
