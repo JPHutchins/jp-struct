@@ -308,3 +308,31 @@ def test_the_boundary_agrees_with_python_about_identifiers(trailing):
         refused = True
 
     assert refused is not part_of_a_longer_name
+
+
+def test_a_failing_origin_probe_fails_the_class():
+    """The object path asks every non-type annotation for `__origin__`, and a
+    user object answers with whatever its `__getattr__` does. Not having one
+    ends the walk; anything else is a failure to look, and a failure to look
+    must not read as "this is an ordinary field".
+    """
+
+    class Hostile:
+        def __getattr__(self, name: str) -> object:
+            if name == "__origin__":
+                raise RuntimeError("boom")
+
+            raise AttributeError(name)
+
+    with pytest.raises(RuntimeError, match="boom"):
+
+        class Refused(Struct):
+            v: Hostile()
+
+    class Quiet:
+        def __getattr__(self, name: str) -> object:
+            raise AttributeError(name)
+
+    Ordinary = type(Struct)("Ordinary", (Struct,), {"__annotations__": {"v": Quiet()}})
+
+    assert Ordinary.__struct_fields__ == ("v",)
