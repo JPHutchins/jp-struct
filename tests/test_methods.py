@@ -1,11 +1,11 @@
 """Methods on a struct, in the shapes people actually write them.
 
 A struct's body is an ordinary class body, and the methods it defines are kept
--- except a name that collides with a field, where the slot descriptor wins.
-These are the codec-shaped methods that motivate reaching for a struct in the
-first place -- `to_bytes`, `to_string`, a `from_bytes` classmethod -- plus the
-descriptors that sit alongside them, and the dunders that salix would otherwise
-generate.
+-- except a name that collides with a field, which is not kept and not simply
+lost either: it becomes that field's default. These are the codec-shaped methods
+that motivate reaching for a struct in the first place -- `to_bytes`,
+`to_string`, a `from_bytes` classmethod -- plus the descriptors that sit
+alongside them, and the dunders that salix would otherwise generate.
 
 Methods are the subject; `__slots__` and `__match_args__` are salix's whatever
 the body says, and `TestBindingsSalixOwns` is where that is pinned.
@@ -142,7 +142,7 @@ class TestInheritedMethods:
 
         tagged = Tagged(258, 7, 1, 9)
 
-        assert tagged.header_size() == HEADER.size
+        assert tagged.header_size() == 4
         assert tagged.is_empty is False
         assert tagged.to_string() == "07:0102:01"
 
@@ -211,7 +211,7 @@ class TestCaching:
 
         instance = Cached(2)
 
-        assert instance.expensive == 200
+        assert [instance.expensive for _ in range(3)] == [200, 200, 200]
         assert len(calls) == 1
 
     def test_functools_cache_on_a_method_still_works(self):
