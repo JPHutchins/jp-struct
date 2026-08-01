@@ -155,6 +155,42 @@ class TestMutableDefaults:
         assert first.pair is second.pair
         assert first.nested is second.nested
 
+    def test_the_class_keeps_its_own_copy_of_the_declared_default(self):
+        """The emptiness the refusal checked has to stay true. A module-level
+        container declared as the default is still the module's to append to,
+        and the class would otherwise be holding the same object -- so every
+        instance would get a shallow copy of something the refusal rejected.
+
+        msgspec severs the same alias by replacing the default with a Factory.
+        """
+
+        shared = []
+
+        class Holder(Struct, frozen=False):
+            xs: list = shared
+
+        shared.append([2])
+
+        assert Holder.__struct_defaults__[0] is not shared
+        assert Holder().xs == []
+
+    def test_construction_and_inheritance_agree_after_that_mutation(self):
+        """One copies and one refuses, so they have to be looking at the same
+        thing: the stored default, which nothing outside the class can fill.
+        """
+
+        shared = []
+
+        class Holder(Struct, frozen=False):
+            xs: list = shared
+
+        shared.append([2])
+
+        class Inheriting(Holder):
+            pass
+
+        assert Inheriting().xs == []
+
     def test_a_supplied_value_is_still_stored_rather_than_copied(self):
         """Only the default is the class's to hand out repeatedly."""
 
@@ -181,6 +217,23 @@ class TestMutableDefaults:
 
             class Holder(Struct):
                 v: object = value
+
+    def test_a_body_init_does_not_exempt_the_declared_default(self):
+        """Its constructor never reads the default, so nothing is shared -- but
+        the declaration is still a promise the class makes through
+        __struct_defaults__, and dataclasses refuses it under init=False for the
+        same reason. The message names both hooks because __post_init__ is not
+        one of them here: a body __init__ displaces the generated constructor,
+        and run_post_init goes with it.
+        """
+
+        with pytest.raises(TypeError, match=r"non-empty list.*your own __init__"):
+
+            class Holder(Struct, frozen=False):
+                xs: list = ["a", "b"]  # noqa: RUF012 -- the refusal is the assertion
+
+                def __init__(self) -> None:
+                    self.xs = []
 
     def test_a_subclass_of_a_mutable_builtin_is_shared_not_copied(self):
         """The copy has to preserve the type and PyDict_Copy of a defaultdict is

@@ -2,6 +2,7 @@
 #include <stdbool.h>
 
 #include "annotations.h"
+#include "construct.h"
 #include "fields.h"
 #include "owned.h"
 #include "result.h"
@@ -215,8 +216,8 @@ static enum result reject_unsafe_default(PyObject * const field_name, PyObject *
 	PyErr_Format(
 		PyExc_TypeError,
 		"field '%U' defaults to a non-empty %.100s, which every instance would "
-		"share the contents of; default it to an empty one and fill it in "
-		"__post_init__ with set_field",
+		"share the contents of; default it to an empty one and fill it from "
+		"__post_init__, or from your own __init__, with set_field",
 		field_name,
 		kind->tp_name
 	);
@@ -268,7 +269,17 @@ static PyObject * build_defaults(PyObject * const all_names, PyObject * const de
 			return NULL;
 		}
 
-		PyTuple_SET_ITEM(defaults, i - first_default, Py_NewRef(value));
+		/* Empty now and no longer anyone else's to fill: what the class stores
+		 * is its own, so the emptiness this just checked is permanent. */
+		PyObject * const stored = struct_default_copy(value);
+
+		if (stored == NULL) {
+			Py_DECREF(defaults);
+
+			return NULL;
+		}
+
+		PyTuple_SET_ITEM(defaults, i - first_default, stored);
 	}
 
 	return defaults;

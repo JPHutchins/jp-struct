@@ -38,7 +38,6 @@ static enum result write_slot(
 	PyObject * value
 );
 static enum result run_post_init(StructType const * type, PyObject * self);
-static PyObject * default_for(PyObject * declared);
 
 /*
  * Instances are built straight into slot memory: allocate, then let each of
@@ -190,7 +189,7 @@ static enum result fill_defaults(
 			return RESULT_ERROR;
 		}
 
-		PyObject * const value = default_for(
+		PyObject * const value = struct_default_copy(
 			PyTuple_GET_ITEM(type->struct_defaults, i - required_count)
 		);
 
@@ -211,6 +210,12 @@ static enum result fill_defaults(
  * will mutate" are copied, and only when empty -- a non-empty one is refused at
  * class creation, since copying it could only be shallow.
  *
+ * Class creation takes a copy too, so what the class stores is not the object
+ * the body named. `shared = []` kept at module level and appended to afterwards
+ * would otherwise make the stored default non-empty behind the refusal's back,
+ * and every instance would get a shallow copy of it. msgspec severs the same
+ * alias by turning the default into a Factory.
+ *
  * Everything else is shared. That is right for an int, a string or a tuple of
  * them, and for a frozen struct of them: none can be rebound or mutated. It is
  * *not* right for a shallowly-immutable container of something mutable --
@@ -222,7 +227,7 @@ static enum result fill_defaults(
  * it at all. This copies, so the common spelling means what it looks like it
  * means, and pays for it only on the fields that have one.
  */
-static PyObject * default_for(PyObject * const declared) {
+PyObject * struct_default_copy(PyObject * const declared) {
 	PyTypeObject * const kind = Py_TYPE(declared);
 
 	if (kind == &PyList_Type) {
