@@ -1,4 +1,5 @@
 #include <Python.h>
+#include <stdbool.h>
 
 #include "annotations.h"
 #include "owned.h"

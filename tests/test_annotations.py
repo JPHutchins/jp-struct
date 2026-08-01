@@ -57,11 +57,12 @@ class TestANonFunctionAnnotate:
         """All three surface the NameError rather than an AttributeError about
         __globals__, which is what the PyFunction_Check guard is for.
 
-        What this cannot detect is the escalation being deleted: a
-        protocol-correct annotate refuses VALUE_WITH_FAKE_GLOBALS too, so
-        annotationlib falls back to a real-globals VALUE re-run and raises the
-        same NameError the direct call would have. TestForwardReferences is
-        where the escalation has to exist for the class to build at all.
+        The message alone cannot tell any of that: a protocol-correct annotate
+        refuses VALUE_WITH_FAKE_GLOBALS too, so annotationlib falls back to a
+        real-globals VALUE re-run and raises the same NameError a direct call
+        would have. `__context__` is what differs, and asserting it makes both
+        the guard and the escalation detectable here -- deleting either one
+        moves a `__context__` that this now checks.
         """
 
         annotate = TestANonFunctionAnnotate.protocol_correct
@@ -199,21 +200,18 @@ class TestForwardReferences:
         builds. Plain 3.14 defers this too -- the divergence is the explicit
         `raise NameError`, which salix propagates and CPython would defer.
 
-        The call count is asserted rather than the mechanism described: the
-        rescue really does re-run the annotation, helper included.
+        How many times annotationlib re-runs the annotation on the way there is
+        its business and not asserted: a count is not the claim, and it moves
+        when annotationlib changes without the claim moving with it.
         """
 
-        calls = []
-
         def helper():
-            calls.append(1)
             return undefined_inside  # noqa: F821
 
         class Deferred(Struct):
             x: helper()
 
         assert Deferred.__struct_fields__ == ("x",)
-        assert len(calls) > 1
 
     def test_a_forged_name_attribute_reads_as_a_forward_reference(self):
         """The discriminator asks whether `.name` is set, and the keyword form
