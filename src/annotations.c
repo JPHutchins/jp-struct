@@ -123,7 +123,14 @@ static PyObject * evaluate(PyObject * const annotate) {
  * Not resolving a name is the exemption; arbitrary failure is not, and a
  * NameError the annotation raised for its own reasons is arbitrary failure
  * wearing the right coat. The interpreter fills `name` in when a lookup is what
- * failed, and leaves it None for an explicit ``raise NameError(...)``.
+ * failed, and `raise NameError("...")` leaves it None.
+ *
+ * Which is what this can tell apart, and all of it. `raise NameError(name=...)`
+ * sets the attribute and reads as a forward reference; so does anything at all,
+ * once an *earlier* annotation forward-references, because the rescue
+ * re-evaluates the whole dict and stringifies what it cannot resolve. The
+ * exemption is best-effort against accidents, not a wall against a caller who
+ * wants past it.
  */
 static bool names_an_unresolved_symbol(PyObject * const error) {
 	PyObject * found = NULL;

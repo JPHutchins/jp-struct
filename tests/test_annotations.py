@@ -71,8 +71,15 @@ class TestANonFunctionAnnotate:
             "callable": TestANonFunctionAnnotate.wrapped_in_an_object(annotate),
         }[wrap]
 
-        with pytest.raises(NameError, match="Undefined"):
+        with pytest.raises(NameError, match="Undefined") as raised:
             type(Struct)("Wrapped", (Struct,), {"__annotate__": wrapped})
+
+        # The discriminator the message cannot carry: only the plain function
+        # reaches annotationlib, and only it comes back with a __context__ from
+        # having done so. Below 3.14 nothing escalates, so nobody has one.
+        escalates = wrap == "plain" and sys.version_info >= (3, 14)
+
+        assert (raised.value.__context__ is not None) is escalates
 
     def test_a_callable_object_is_accepted_when_its_names_resolve(self):
         class Annotate:
@@ -191,15 +198,62 @@ class TestForwardReferences:
         callee, so a buggy helper reads as a forward reference and the class
         builds. Plain 3.14 defers this too -- the divergence is the explicit
         `raise NameError`, which salix propagates and CPython would defer.
+
+        The call count is asserted rather than the mechanism described: the
+        rescue really does re-run the annotation, helper included.
         """
 
+        calls = []
+
         def helper():
+            calls.append(1)
             return undefined_inside  # noqa: F821
 
         class Deferred(Struct):
             x: helper()
 
         assert Deferred.__struct_fields__ == ("x",)
+        assert len(calls) > 1
+
+    def test_a_forged_name_attribute_reads_as_a_forward_reference(self):
+        """The discriminator asks whether `.name` is set, and the keyword form
+        sets it -- so this is the exemption's boundary, not a wall. Pinned
+        because the positional form beside it propagates, and the difference is
+        one word in the raising code.
+        """
+
+        def forged():
+            raise NameError(name="x")
+
+        class Built(Struct):
+            v: forged()
+
+        assert Built.__struct_fields__ == ("v",)
+
+    def test_the_exemption_is_order_dependent(self):
+        """The rescue is all-or-nothing: it re-evaluates every annotation and
+        stringifies what it cannot resolve, so an arbitrary failure that comes
+        *after* a forward reference is swallowed with it, and the same pair in
+        the other order propagates.
+
+        Not fixable while the rescue goes through `__annotate__`, which hands
+        back the whole dict or nothing.
+        """
+
+        def boom():
+            raise NameError("boom")
+
+        class Rescued(Struct):
+            x: Missing  # noqa: F821
+            y: boom()
+
+        assert Rescued.__struct_fields__ == ("x", "y")
+
+        with pytest.raises(NameError, match="boom"):
+
+            class Propagates(Struct):
+                y: boom()
+                x: Missing  # noqa: F821
 
     def test_a_raised_NameError_is_arbitrary_failure_too(self):
         """The exemption is the interpreter's failure to find a name, not the
