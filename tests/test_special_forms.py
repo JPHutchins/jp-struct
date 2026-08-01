@@ -101,25 +101,29 @@ def test_an_annotated_init_var_does_not_hide_the_form_either():
 
 
 @pytest.mark.parametrize(
-    "text",
+    ("text", "form"),
     [
-        "ClassVar[int]",
-        "ClassVar",
-        "typing.ClassVar[int]",
-        "t.ClassVar[int]",
-        "InitVar[int]",
-        "Annotated[ClassVar[int], 'meta']",
-        "Annotated[InitVar[int], 'meta']",
-        "ClassVar ",
-        "ClassVar [int]",
-        "Annotated[ ClassVar[int], 'meta' ]",
-        "Annotated[ ClassVar ]",
-        "Optional[ClassVar[int]]",
-        "x\x00ClassVar[int]",
-        "'ClassVar[int]'",
+        ("ClassVar[int]", "ClassVar"),
+        ("ClassVar", "ClassVar"),
+        ("typing.ClassVar[int]", "ClassVar"),
+        ("t.ClassVar[int]", "ClassVar"),
+        ("InitVar[int]", "InitVar"),
+        ("Annotated[ClassVar[int], 'meta']", "ClassVar"),
+        ("Annotated[InitVar[int], 'meta']", "InitVar"),
+        ("ClassVar ", "ClassVar"),
+        ("ClassVar [int]", "ClassVar"),
+        ("Annotated[ ClassVar[int], 'meta' ]", "ClassVar"),
+        ("Annotated[ ClassVar ]", "ClassVar"),
+        ("Annotated[InitVar]", "InitVar"),
+        ("Optional[ClassVar[int]]", "ClassVar"),
+        ("x\x00ClassVar[int]", "ClassVar"),
+        ("'ClassVar[int]'", "ClassVar"),
+        ("ClassVar\u20ac", "ClassVar"),
+        ("\u20acClassVar", "ClassVar"),
+        pytest.param(chr(0xD800) + "ClassVar", "ClassVar", id="lone-surrogate"),
     ],
 )
-def test_the_source_text_form_is_refused_too(text):
+def test_the_source_text_form_is_refused_too(text, form):
     """`from __future__ import annotations` leaves the annotation as its own
     source, where the spelling is all there is to go on.
 
@@ -130,9 +134,18 @@ def test_the_source_text_form_is_refused_too(text):
     A str may hold a NUL, and scanning with `strstr` stopped at it, leaving the
     rest unread and the guard silently off. The quoted one is a nested forward
     reference and has to be refused for the same reason the bare spelling is.
+
+    The euro sign is not an identifier character and a lone surrogate cannot be
+    encoded to UTF-8; both used to reach the guard as bytes, where the first
+    looked like part of a name and the second failed the encode and was waved
+    through. The surrogate is built with chr() rather than written as a literal,
+    because a source file holding one cannot be compiled.
+
+    The expected form is asserted, not just the refusal: matching only "salix
+    does not support" would pass with the two `names_form` calls swapped.
     """
 
-    with pytest.raises(TypeError, match="salix does not support"):
+    with pytest.raises(TypeError, match=f"annotated {form}"):
         type(Struct)("Textual", (Struct,), {"__annotations__": {"v": text}})
 
 
@@ -150,15 +163,17 @@ def test_the_source_text_form_is_refused_too(text):
         "théClassVar",
         "ClassVaré",
         "ÄClassVar",
+        "ClassVar\u0301",
     ],
 )
 def test_a_name_that_merely_contains_the_form_is_a_field(text):
     """The boundary is an identifier character on either side, so widening what
     counts as a separator must not widen what counts as the form.
 
-    The last three are legal identifiers under PEP 3131. Read as UTF-8, the lead
-    byte of a letter like `é` is not ASCII alphanumeric, so an ASCII-only
-    boundary test saw the form standing on its own inside one name.
+    The last four are legal identifiers under PEP 3131 -- the final one ends in a
+    combining acute, which continues an identifier without being a letter. Read
+    as UTF-8 rather than as characters, none of them is ASCII alphanumeric, so a
+    byte-level boundary saw the form standing on its own inside one name.
     """
 
     Ordinary = type(Struct)("Ordinary", (Struct,), {"__annotations__": {"v": text}})
@@ -190,3 +205,61 @@ def test_a_renamed_import_is_not_resolved_in_the_source_text_form():
     Escaped = type(Struct)("Escaped", (Struct,), {"__annotations__": {"v": "CV[int]"}})
 
     assert Escaped.__struct_fields__ == ("v",)
+
+
+def test_a_plain_annotated_is_still_a_field():
+    """The positive control for the object path's Annotated handling: every
+    other Annotated test here is a refusal, so a walk that started reporting a
+    form for everything would pass all of them.
+    """
+
+    class Tagged(Struct):
+        v: Annotated[int, "meta"]
+        w: Annotated[list, "meta", "more"]
+
+    assert Tagged.__struct_fields__ == ("v", "w")
+    assert Tagged(1, []).v == 1
+
+
+def test_a_real_future_annotations_module_takes_the_text_path(tmp_path):
+    """Every other text-path case here hands salix a string it built itself.
+    This one makes the compiler produce the annotations, which is the only way
+    to know the path is reachable the way a user reaches it.
+    """
+
+    module = tmp_path / "future_struct.py"
+    module.write_text(
+        "from __future__ import annotations\n"
+        "from typing import ClassVar\n"
+        "from salix import Struct\n"
+        "\n"
+        "class Registry(Struct):\n"
+        "    instances: ClassVar[list] = []\n"
+        "    name: str\n"
+    )
+
+    with pytest.raises(TypeError, match="annotated ClassVar"):
+        exec(compile(module.read_text(), str(module), "exec"), {"__name__": "future_struct"})
+
+
+def test_a_real_future_annotations_module_still_builds_ordinary_fields():
+    """The other half: the text path must not refuse a class that names no form.
+    Without this, refusing everything would pass the test above.
+    """
+
+    source = (
+        "from __future__ import annotations\n"
+        "from typing import Annotated\n"
+        "from salix import Struct\n"
+        "\n"
+        "class Frame(Struct):\n"
+        "    length: int\n"
+        "    tag: Annotated[str, 'meta'] = 'x'\n"
+    )
+    namespace: dict[str, object] = {"__name__": "future_ordinary"}
+
+    exec(compile(source, "<future_ordinary>", "exec"), namespace)
+    Frame = namespace["Frame"]
+
+    assert Frame.__struct_fields__ == ("length", "tag")  # type: ignore[attr-defined]
+    assert Frame(1).tag == "x"  # type: ignore[operator]

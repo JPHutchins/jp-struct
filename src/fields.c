@@ -1,6 +1,5 @@
 #include <Python.h>
 #include <stdbool.h>
-#include <string.h>
 
 #include "annotations.h"
 #include "fields.h"
@@ -42,7 +41,8 @@ static struct special_form special_form_of(
 	PyObject * init_var
 );
 static struct special_form named_special_form(PyObject * text);
-static bool names_form(char const * source, Py_ssize_t length, char const * form);
+static bool names_form(PyObject * text, char const * form);
+static bool continues_identifier(Py_UCS4 character);
 static PyObject * module_attribute(char const * module_name, char const * attribute);
 
 /* The plan only takes references once every step has succeeded; the working
@@ -277,6 +277,12 @@ static struct special_form special_form_of(
 		return named_special_form(annotation);
 	}
 
+	/* Neither module is loaded, so nothing reachable from here can be either
+	 * form and the walk below can only ask __origin__ of things for nothing. */
+	if (class_var == NULL && init_var == NULL) {
+		return (struct special_form){0};
+	}
+
 	PyObject * current = annotation;
 
 	PY_MOVABLE(held, NULL);
@@ -324,20 +330,11 @@ static struct special_form special_form_of(
  * does not.
  */
 static struct special_form named_special_form(PyObject * const text) {
-	Py_ssize_t length = 0;
-	char const * const source = PyUnicode_AsUTF8AndSize(text, &length);
-
-	if (source == NULL) {
-		PyErr_Clear();
-
-		return (struct special_form){0};
-	}
-
-	if (names_form(source, length, "ClassVar")) {
+	if (names_form(text, "ClassVar")) {
 		return CLASS_VAR_FORM;
 	}
 
-	if (names_form(source, length, "InitVar")) {
+	if (names_form(text, "InitVar")) {
 		return INIT_VAR_FORM;
 	}
 
@@ -354,10 +351,13 @@ static struct special_form named_special_form(PyObject * const text) {
  * `ClassVar ` and `ClassVar [int]`, both legal and both stored verbatim under
  * future annotations, walked past an earlier version of this.
  *
- * A byte at or above 0x80 counts as an identifier character. PEP 3131 lets an
- * identifier hold any Unicode letter, and this reads UTF-8, so the lead byte of
- * `é` is the middle of a name rather than the end of one -- otherwise
- * `théClassVar` reads as the form standing on its own.
+ * Characters rather than UTF-8 bytes, and Python's own identifier rule rather
+ * than a hand-written one. PEP 3131 lets a name hold any Unicode letter, so an
+ * ASCII-only test read `théClassVar` as the form standing alone; calling every
+ * byte at or above 0x80 an identifier character fixed that and broke the other
+ * direction, since `€` is not one. Working on the str also means a lone
+ * surrogate or an embedded NUL is nothing special -- neither has to survive an
+ * encode that the guard would otherwise fail open on.
  *
  * A heuristic in both directions, and the only thing available once the
  * annotation is source text. It misses a renamed import -- `ClassVar as CV`
@@ -369,40 +369,57 @@ static struct special_form named_special_form(PyObject * const text) {
  * apart. #57 keeps the list. The object path is exact, and it is what
  * runs unless the module asked for `from __future__ import annotations`.
  */
-static bool identifier_character(unsigned char const byte) {
-	return (
-		(byte >= 'a' && byte <= 'z') ||
-		(byte >= 'A' && byte <= 'Z') ||
-		(byte >= '0' && byte <= '9') ||
-		byte == '_' ||
-		byte >= 0x80
-	);
+static bool continues_identifier(Py_UCS4 const character) {
+	/* Python owns the answer and spells it one way in the C API: a name is an
+	 * identifier when its first character starts one and the rest continue one,
+	 * so "a" followed by this character asks about exactly this character. */
+	PY_OWNED(probe, PyUnicode_New(2, character > 'a' ? character : 'a'));
+
+	if (
+		probe == NULL ||
+		PyUnicode_WriteChar(probe, 0, 'a') < 0 ||
+		PyUnicode_WriteChar(probe, 1, character) < 0
+	) {
+		PyErr_Clear();
+
+		return false;
+	}
+
+	return PyUnicode_IsIdentifier(probe) == 1;
 }
 
-static bool names_form(
-	char const * const source,
-	Py_ssize_t const source_length,
-	char const * const form
-) {
-	Py_ssize_t const form_length = (Py_ssize_t) strlen(form);
+static bool names_form(PyObject * const text, char const * const form) {
+	PY_OWNED(needle, PyUnicode_FromString(form));
 
-	/* Bounded by the string's own length rather than its first NUL. A str is
-	 * allowed to contain one, and strstr would stop there -- leaving whatever
-	 * follows unscanned and the guard silently off. */
-	for (Py_ssize_t at = 0; at + form_length <= source_length; ++at) {
-		if (memcmp(source + at, form, (size_t) form_length) != 0) {
-			continue;
+	if (needle == NULL) {
+		PyErr_Clear();
+
+		return false;
+	}
+
+	Py_ssize_t const length = PyUnicode_GET_LENGTH(text);
+	Py_ssize_t const form_length = PyUnicode_GET_LENGTH(needle);
+
+	for (Py_ssize_t at = 0; at + form_length <= length; ++at) {
+		Py_ssize_t const found = PyUnicode_Find(text, needle, at, length, 1);
+
+		if (found < 0) {
+			PyErr_Clear();
+
+			return false;
 		}
 
-		bool const opens = at == 0 || !identifier_character(source[at - 1]);
+		bool const opens = found == 0 || !continues_identifier(PyUnicode_ReadChar(text, found - 1));
 		bool const closes = (
-			at + form_length == source_length ||
-			!identifier_character(source[at + form_length])
+			found + form_length == length ||
+			!continues_identifier(PyUnicode_ReadChar(text, found + form_length))
 		);
 
 		if (opens && closes) {
 			return true;
 		}
+
+		at = found;
 	}
 
 	return false;
