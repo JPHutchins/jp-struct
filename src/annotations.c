@@ -61,7 +61,13 @@ static PyObject * evaluate(PyObject * const annotate) {
 	PY_MOVABLE(resolved, PyObject_CallFunction(annotate, "i", ANNOTATION_FORMAT_VALUE));
 
 #if PY_VERSION_HEX >= 0x030E0000
-	if (resolved == NULL && PyErr_ExceptionMatches(PyExc_NameError)) {
+	/* Only a plain function: annotationlib's FORWARDREF path rebuilds the
+	 * callable from its __globals__ and __code__, so anything else -- a partial,
+	 * a callable object -- fails there with an AttributeError that hides the
+	 * NameError actually worth reporting. Left unescalated it raises the same
+	 * thing a plain function does, and the same thing every version below 3.14
+	 * does. */
+	if (resolved == NULL && PyFunction_Check(annotate) && PyErr_ExceptionMatches(PyExc_NameError)) {
 		PyErr_Clear();
 
 		PY_OWNED(annotationlib, PyImport_ImportModule("annotationlib"));
