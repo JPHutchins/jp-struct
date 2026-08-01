@@ -8,8 +8,9 @@ that motivate reaching for a struct in the first place -- `to_bytes`,
 alongside them, and the dunders that salix would otherwise generate.
 
 Methods are the subject. `__slots__` is salix's whatever the body says, and
-`__match_args__` is unless the class opts out of it; `TestBindingsSalixOwns`
-pins both, including where the body wins.
+`__match_args__` is unless the class opts out -- which means salix writes none
+rather than that the class has none, since `Struct`'s own empty tuple is still
+in the MRO. `TestBindingsSalixOwns` pins all of that.
 """
 
 import dataclasses
@@ -140,17 +141,8 @@ class TestMethods:
         assert instance == Custom(1)
         assert hash(instance) == hash((10,))
 
-    def test_a_body_eq_and_hash_displace_the_generated_ones(self):
-        """The header says the body keeps the dunders salix would have written,
-        and these are the two a body is most likely to want back.
-
-        `__ne__` does not come with `__eq__`, which is #58: salix binds the
-        mixin's, so `a == b` and `a != b` are both true here. A dataclass and a
-        plain class both derive `!=` from the body's `__eq__` and disagree with
-        salix on the second assertion below. Pinned as it is, so the fix has to
-        come back and change this line.
-        """
-
+    @staticmethod
+    def loose_equality():
         class Loose(Struct):
             x: int
 
@@ -160,12 +152,59 @@ class TestMethods:
             def __hash__(self) -> int:
                 return 0
 
+        return Loose
+
+    def test_a_body_eq_and_hash_displace_the_generated_ones(self):
+        """The header says the body keeps the dunders salix would have written,
+        and these are the two a body is most likely to want back.
+        """
+
+        Loose = self.loose_equality()
         first, second = Loose(1), Loose(2)
 
         assert first == second
-        assert first != second  # #58: both are true, and that is the bug
         assert hash(first) == hash(Loose(99)) == 0
         assert len({first, second}) == 1
+
+    @pytest.mark.xfail(strict=True, reason="#58: salix keeps the mixin's __ne__")
+    def test_a_body_eq_should_carry_ne_with_it(self):
+        """Asserted as it should be rather than as it is, so the assertion goes
+        green the moment #58 is fixed and strict=True makes that impossible to
+        miss.
+        """
+
+        Loose = self.loose_equality()
+
+        assert (Loose(1) != Loose(2)) is False
+
+    def test_every_other_construction_derives_ne_from_eq(self):
+        """The parity claim the test above rests on, asserted rather than
+        described -- this file has been wrong about a sibling's behaviour more
+        than once.
+        """
+
+        @dataclasses.dataclass(eq=False)
+        class Data:
+            x: int
+
+            def __eq__(self, other: object) -> bool:
+                return isinstance(other, Data)
+
+            def __hash__(self) -> int:
+                return 0
+
+        class Plain:
+            def __init__(self, x: int) -> None:
+                self.x = x
+
+            def __eq__(self, other: object) -> bool:
+                return isinstance(other, Plain)
+
+            def __hash__(self) -> int:
+                return 0
+
+        assert (Data(1) != Data(2)) is False
+        assert (Plain(1) != Plain(2)) is False
 
     def test_the_generated_dunders_survive_alongside_them(self):
         frame = Frame(258, 7, 1)
@@ -352,8 +391,13 @@ class TestBindingsSalixOwns:
         assert Matched.__match_args__ == ("x",)
 
     def test_opting_out_of_match_args_leaves_the_body_its_own(self):
-        """`match_args=False` means salix writes none, not that it writes an
-        empty one -- so the body keeps what it wrote, and `__slots__` does not.
+        """`match_args=False` means salix writes none into this namespace, so
+        the body keeps what it wrote -- and `__slots__` does not.
+
+        Not that the class has none: `Struct` itself carries a generated `()`,
+        which every subclass sees through the MRO, so a struct that opts out and
+        writes nothing still reports `()`. `dataclass(match_args=False)` has no
+        attribute at all. Both asserted below.
         """
 
         class Matched(Struct, match_args=False):
@@ -361,8 +405,13 @@ class TestBindingsSalixOwns:
             __match_args__ = ("nope",)
             __slots__ = ("extra",)
 
+        class Silent(Struct, match_args=False):
+            x: int
+
         assert Matched.__match_args__ == ("nope",)
         assert Matched.__slots__ == ("x",)
+        assert Silent.__match_args__ == ()
+        assert Struct.__match_args__ == ()
 
 
 class TestNameCollisions:
