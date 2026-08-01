@@ -275,6 +275,8 @@ def test_a_delegating_metatype_installs_the_field_table_once():
     assert built.__struct_fields__ == ("x", "y")
     assert built(1, 2).y == 2
 
-    # One for the namespace dict, one for the class that resolved it. A second
-    # install would take a third and never give it back.
+    # `before` already counts the namespace dict's reference. The two are the
+    # built class's own __post_init__ binding and the struct_post_init that
+    # install_post_init resolved. A second install would take a third and never
+    # give it back.
     assert sys.getrefcount(post_init) - before == 2

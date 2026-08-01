@@ -265,7 +265,7 @@ static StructType * find_struct_base(PyObject * const bases) {
 	for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(bases); ++i) {
 		PyObject * const base = PyTuple_GET_ITEM(bases, i);
 
-		if (PyObject_TypeCheck(base, &StructMeta_Type)) {
+		if (is_struct_class(base)) {
 			return (StructType *) base;
 		}
 	}
@@ -540,9 +540,15 @@ static StructType * create_class(
 
 /*
  * type_new's own rule: the most derived of the requested metatype and the
- * bases' metatypes builds the class. Metatypes that are unrelated to each
- * other are a conflict rather than a winner, and this returns the requested one
- * for that case so type_new raises the error it has always raised.
+ * bases' metatypes builds the class. CPython keeps that rule in
+ * _PyType_CalculateMetaclass, which is not in the public API, so it is written
+ * out here rather than called.
+ *
+ * Only the winner is wanted, and only to decide who builds. Metatypes unrelated
+ * to each other are a conflict rather than a winner, and returning the
+ * requested one for that case hands type_new an argument it will reject with
+ * the metaclass-conflict error it has always raised -- the one message a caller
+ * already knows.
  */
 static PyTypeObject * winning_metatype(PyTypeObject * const requested, PyObject * const bases) {
 	PyTypeObject * winner = requested;

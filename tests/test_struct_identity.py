@@ -92,6 +92,63 @@ class TestTheMetaclassWithoutTheMixin:
         assert built(1, 2) == built(1, 2)
 
 
+class TestTheUninstalledClassCannotBeBuilt:
+    """`is_struct` asks the metaclass, so every StructMeta instance has to have
+    a field table. What guarantees it is CPython's own `tp_new_wrapper`: the
+    most derived non-heap base of the requested type is `StructMeta`, whose
+    `tp_new` is not `type`'s, so `type.__new__` refuses to build one.
+
+    That guard is load-bearing and it is CPython's, not salix's, so these pin it
+    on every supported version rather than trusting it. Without it, the class
+    would have NULL `struct_field_names` and `x == x` would reach
+    `PyObject_RichCompareBool(NULL, NULL, Py_EQ)`.
+    """
+
+    @staticmethod
+    def metaclass_subclass_that_builds_with_type_new():
+        class Substituting(salix.StructMeta):
+            def __new__(mcls, *args, **keywords):
+                return type.__new__(mcls, *args, **keywords)
+
+        return Substituting
+
+    def test_type_new_refuses_the_metaclass(self):
+        with pytest.raises(TypeError, match="is not safe"):
+            type.__new__(salix.StructMeta, "S", (Point,), {})
+
+    def test_type_new_refuses_a_metaclass_subclass(self):
+        class Inheriting(salix.StructMeta):
+            pass
+
+        with pytest.raises(TypeError, match="is not safe"):
+            type.__new__(Inheriting, "S", (Point,), {})
+
+    def test_a_metaclass_new_that_reaches_for_type_new_is_refused_too(self):
+        """The substitution route into the same hole: the refusal follows the
+        metatype rather than the call site.
+        """
+
+        Substituting = self.metaclass_subclass_that_builds_with_type_new()
+
+        with pytest.raises(TypeError, match="is not safe"):
+            type.__new__(Substituting, "S", (Point,), {})
+
+        with pytest.raises(TypeError, match="is not safe"):
+            Substituting("S", (Point,), {})
+
+    def test_the_supported_route_still_installs(self):
+        """types.new_class goes the long way round and comes out a real struct,
+        so the refusals above are not refusing everything.
+        """
+
+        import types
+
+        built = types.new_class("S", (Point,), {"metaclass": salix.StructMeta})
+
+        assert built.__struct_fields__ == ("x",)
+        assert built(1) == built(1)
+
+
 class TestAMetaclassSubclass:
     def test_one_that_delegates_produces_a_struct(self):
         class Delegating(salix.StructMeta):
@@ -118,6 +175,26 @@ class TestAMetaclassSubclass:
 
         assert built(1, 2) < built(1, 3)
         assert type(built) is Delegating
+
+    def test_two_unrelated_metatypes_still_raise_the_conflict(self):
+        """Picking the winner ourselves must not swallow the case that has no
+        winner: type_new is handed the requested metatype and says so.
+        """
+
+        class Left(salix.StructMeta):
+            pass
+
+        class Right(salix.StructMeta):
+            pass
+
+        class FromLeft(Struct, metaclass=Left):
+            x: int
+
+        class FromRight(Struct, metaclass=Right):
+            y: int
+
+        with pytest.raises(TypeError, match="metaclass conflict"):
+            salix.StructMeta("Both", (FromLeft, FromRight), {})
 
     def test_a_default_survives_the_handoff_to_a_derived_metatype(self):
         """The re-entered call read the namespace after drop_class_variables had
