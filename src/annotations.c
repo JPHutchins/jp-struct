@@ -66,10 +66,11 @@ static PyObject * borrow_annotate(PyObject * const namespace) {
  * NotImplementedError for FORWARDREF and STRING. Measured, having been written
  * from memory three times and been wrong three times. That is what the rebuild
  * is for: annotationlib gives the copy fake globals and calls it with format 2,
- * so the evaluating branch runs against stringifiers,
- * and annotationlib is stdlib only from 3.14 -- below that there is no PEP 649
- * either, so an __annotate__ in the namespace is one the class body wrote and
- * VALUE is the whole story.
+ * so the evaluating branch runs against stringifiers.
+ *
+ * None of this exists below 3.14. annotationlib is stdlib only from there, and
+ * so is PEP 649, so an __annotate__ in the namespace is one the class body
+ * wrote and VALUE is the whole story.
  *
  * The import is a plain path-based one and could in principle find a user
  * module of that name; a checkout that shadows a stdlib module has larger

@@ -138,11 +138,13 @@ class TestANonFunctionAnnotate:
             if format == 1:
                 raise NameError("nope", name="nope")
 
-            return {"only_this": int}
+            # Keyed by format, so this fails rather than passes if the
+            # escalation ever asks for STRING (4) instead of FORWARDREF (3).
+            return {f"answered_{format}": int}
 
         Built = type(Struct)("Built", (Struct,), {"__annotate__": inconsistent})
 
-        assert Built.__struct_fields__ == ("only_this",)
+        assert Built.__struct_fields__ == ("answered_3",)
 
     @pytest.mark.skipif(
         sys.version_info < (3, 14),
