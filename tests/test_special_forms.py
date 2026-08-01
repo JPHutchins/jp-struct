@@ -110,11 +110,20 @@ def test_an_annotated_init_var_does_not_hide_the_form_either():
         "InitVar[int]",
         "Annotated[ClassVar[int], 'meta']",
         "Annotated[InitVar[int], 'meta']",
+        "ClassVar ",
+        "ClassVar [int]",
+        "Annotated[ ClassVar[int], 'meta' ]",
+        "Annotated[ ClassVar ]",
+        "Optional[ClassVar[int]]",
     ],
 )
 def test_the_source_text_form_is_refused_too(text):
     """`from __future__ import annotations` leaves the annotation as its own
     source, where the spelling is all there is to go on.
+
+    The spacings are legal Python and stored verbatim, and an earlier boundary
+    rule that enumerated openers and closers separately let every one of them
+    through -- accepting a space before the form and not after it.
     """
 
     with pytest.raises(TypeError, match="salix does not support"):
@@ -123,9 +132,22 @@ def test_the_source_text_form_is_refused_too(text):
 
 @pytest.mark.parametrize(
     "text",
-    ["int", "MyClassVarThing", "ClassVarish", "list[int]", "dict[str, int]", 'Annotated[int, "x"]'],
+    [
+        "int",
+        "MyClassVarThing",
+        "ClassVarish",
+        "ClassVar_",
+        "_ClassVar",
+        "list[int]",
+        "dict[str, int]",
+        'Annotated[int, "x"]',
+    ],
 )
 def test_a_name_that_merely_contains_the_form_is_a_field(text):
+    """The boundary is an identifier character on either side, so widening what
+    counts as a separator must not widen what counts as the form.
+    """
+
     Ordinary = type(Struct)("Ordinary", (Struct,), {"__annotations__": {"v": text}})
 
     assert Ordinary.__struct_fields__ == ("v",)

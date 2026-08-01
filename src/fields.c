@@ -145,9 +145,21 @@ static enum result append_declared(
 	Py_ssize_t position = 0;
 
 	/* Once per class, not once per field. Absent means the module was never
-	 * imported, so nothing in this body can be naming what it holds. */
+	 * imported, so nothing in this body can be naming what it holds -- but
+	 * absent and failed both come back NULL, and only the exception tells them
+	 * apart. Failing here has to fail the class rather than quietly leave it
+	 * unguarded. */
 	PY_OWNED(class_var, module_attribute("typing", "ClassVar"));
+
+	if (class_var == NULL && PyErr_Occurred()) {
+		return RESULT_ERROR;
+	}
+
 	PY_OWNED(init_var, module_attribute("dataclasses", "InitVar"));
+
+	if (init_var == NULL && PyErr_Occurred()) {
+		return RESULT_ERROR;
+	}
 
 	while (PyDict_Next(annotations, &position, &field_name, &annotation)) {
 		if (!PyUnicode_CheckExact(field_name)) {
@@ -327,16 +339,31 @@ static struct special_form named_special_form(PyObject * const text) {
 }
 
 /*
- * The form standing on its own somewhere in the text: at the start, after a dot
- * for a module alias, or inside a subscript for `Annotated[ClassVar[int], ...]`.
- * Not MyClassVar, and not ClassVarish.
+ * The form standing on its own somewhere in the text -- at the start, after a
+ * dot for a module alias, inside a subscript for `Annotated[ClassVar[int], ...]`
+ * -- rather than as part of a longer name. Not MyClassVar, and not ClassVarish.
+ *
+ * The boundary is "no identifier character adjacent" rather than a list of the
+ * punctuation seen so far. Enumerating openers and closers separately is how
+ * `ClassVar ` and `ClassVar [int]`, both legal and both stored verbatim under
+ * future annotations, walked past an earlier version of this.
  *
  * A heuristic in both directions, and the only thing available once the
  * annotation is source text. It misses a renamed import -- `ClassVar as CV`
  * gives `CV[int]` -- and it refuses a user's own type that happens to be called
- * ClassVar. The object path, which is what runs unless the module asked for
- * `from __future__ import annotations`, is exact and has neither problem.
+ * ClassVar, and `Annotated[int, ClassVar]` where the form is metadata rather
+ * than the type. #57 keeps the list. The object path is exact, and it is what
+ * runs unless the module asked for `from __future__ import annotations`.
  */
+static bool identifier_character(char const character) {
+	return (
+		(character >= 'a' && character <= 'z') ||
+		(character >= 'A' && character <= 'Z') ||
+		(character >= '0' && character <= '9') ||
+		character == '_'
+	);
+}
+
 static bool names_form(char const * const source, char const * const form) {
 	size_t const length = strlen(form);
 
@@ -345,15 +372,9 @@ static bool names_form(char const * const source, char const * const form) {
 		found != NULL;
 		found = strstr(found + 1, form)
 	) {
-		bool const opens = (
-			found == source ||
-			found[-1] == '.' ||
-			found[-1] == '[' ||
-			found[-1] == ' '
-		);
-		char const after = found[length];
+		bool const opens = found == source || !identifier_character(found[-1]);
 
-		if (opens && (after == '\0' || after == '[' || after == ',' || after == ']')) {
+		if (opens && !identifier_character(found[length])) {
 			return true;
 		}
 	}
@@ -366,27 +387,31 @@ static bool names_form(char const * const source, char const * const form) {
  * without importing, which is the whole point. A new reference, so the caller
  * owns it: returning a borrowed one out of a PY_OWNED scope is the shape
  * owned.h warns about, even where the module would have kept it alive.
+ *
+ * NULL with no exception set is the absent module, which is the ordinary answer
+ * and turns the guard off for this class because there is nothing it could be
+ * naming. NULL *with* an exception set is a failure, and the caller has to tell
+ * them apart: swallowing the second one turns a MemoryError into a silently
+ * unguarded class, which is #14 again with no way to notice.
  */
 static PyObject * module_attribute(char const * const module_name, char const * const attribute) {
 	PY_OWNED(name, PyUnicode_FromString(module_name));
 
 	if (name == NULL) {
-		PyErr_Clear();
-
 		return NULL;
 	}
 
 	PY_OWNED(module, PyImport_GetModule(name));
 
 	if (module == NULL) {
-		PyErr_Clear();
-
 		return NULL;
 	}
 
 	PyObject * const found = PyObject_GetAttrString(module, attribute);
 
-	if (found == NULL) {
+	/* A module that exists without the attribute is a stdlib salix does not
+	 * recognise, not a failure. Anything else is. */
+	if (found == NULL && PyErr_ExceptionMatches(PyExc_AttributeError)) {
 		PyErr_Clear();
 	}
 
