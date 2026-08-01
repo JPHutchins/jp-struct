@@ -7,6 +7,12 @@
 #include "result.h"
 #include "types.h"
 
+/* An annotation naming something that is not a field, and what to do instead. */
+struct special_form {
+	char const * name;
+	char const * instead;
+};
+
 enum inheritance : int {
 	INHERITANCE_ERROR = -1,
 	INHERITANCE_NEW = 0,
@@ -29,6 +35,8 @@ static enum result append_declared(
 static PyObject * build_defaults(PyObject * all_names, PyObject * default_by_name);
 static PyObject * checked_annotations(PyObject * namespace);
 static enum inheritance inherits_field(StructType const * base, PyObject * field_name);
+static struct special_form special_form_of(PyObject * annotation);
+static PyObject * borrow_attribute(char const * module_name, char const * attribute);
 
 /* The plan only takes references once every step has succeeded; the working
  * collections belong to this scope either way. */
@@ -136,6 +144,20 @@ static enum result append_declared(
 			return RESULT_ERROR;
 		}
 
+		struct special_form const special = special_form_of(annotation);
+
+		if (special.name != NULL) {
+			PyErr_Format(
+				PyExc_TypeError,
+				"'%U' is annotated %s, which salix does not support; %s",
+				field_name,
+				special.name,
+				special.instead
+			);
+
+			return RESULT_ERROR;
+		}
+
 		/* A default is the class-body value bound to the field name. */
 		PyObject * const declared_default = PyDict_GetItem(namespace, field_name);
 
@@ -185,6 +207,84 @@ static enum inheritance inherits_field(StructType const * const base, PyObject *
 	}
 
 	return INHERITANCE_NEW;
+}
+
+/*
+ * ClassVar and InitVar name something that is not a field, and a checker
+ * reading the stub already knows it -- dataclass_transform excludes both. Left
+ * alone they become fields, so `registry: ClassVar[int] = 0` swallows the first
+ * positional argument and checked code and running code disagree about what it
+ * means. Refused instead, until there is a way to ask for them.
+ *
+ * Nothing is imported to find out. A module nobody imported cannot have
+ * supplied the annotation, so an absent `typing` answers the question for free
+ * -- which is the common case, since a bare interpreter has neither of these
+ * loaded. The same trick dataclasses uses, for the same reason.
+ *
+ * Only the object form is recognised. Under `from __future__ import
+ * annotations` the annotation is the source text, and matching that means
+ * guessing at import aliases; dataclasses guesses, and this does not.
+ */
+static struct special_form special_form_of(PyObject * const annotation) {
+	PyObject * const class_var = borrow_attribute("typing", "ClassVar");
+
+	if (class_var != NULL) {
+		PY_OWNED(origin, PyObject_GetAttrString(annotation, "__origin__"));
+
+		if (origin == NULL) {
+			PyErr_Clear();
+		}
+
+		if (annotation == class_var || origin == class_var) {
+			return (struct special_form){
+				.name = "ClassVar",
+				.instead = "write it below the fields, without an annotation",
+			};
+		}
+	}
+
+	PyObject * const init_var = borrow_attribute("dataclasses", "InitVar");
+
+	if (init_var != NULL && (PyObject *) Py_TYPE(annotation) == init_var) {
+		return (struct special_form){
+			.name = "InitVar",
+			.instead = "take the value in a custom __init__ and write the fields with set_field",
+		};
+	}
+
+	return (struct special_form){0};
+}
+
+/*
+ * The attribute if its module is already loaded, and NULL if it is not --
+ * without importing, which is the whole point. Borrowed: sys.modules holds the
+ * module and the module holds the attribute, both for longer than a class
+ * body lasts.
+ */
+static PyObject * borrow_attribute(char const * const module_name, char const * const attribute) {
+	PY_OWNED(name, PyUnicode_FromString(module_name));
+
+	if (name == NULL) {
+		PyErr_Clear();
+
+		return NULL;
+	}
+
+	PY_OWNED(module, PyImport_GetModule(name));
+
+	if (module == NULL) {
+		return NULL;
+	}
+
+	PY_OWNED(found, PyObject_GetAttrString(module, attribute));
+
+	if (found == NULL) {
+		PyErr_Clear();
+
+		return NULL;
+	}
+
+	return found;
 }
 
 /* Build the defaults tuple as the trailing run of defaulted fields, and
