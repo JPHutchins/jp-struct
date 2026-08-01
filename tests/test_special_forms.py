@@ -298,8 +298,14 @@ def test_the_boundary_agrees_with_python_about_identifiers(trailing):
     the other a bug.
     """
 
-    text = "ClassVar" + trailing
-    part_of_a_longer_name = ("a" + trailing).isidentifier()
+    for text, part_of_a_longer_name in (
+        ("ClassVar" + trailing, ("a" + trailing).isidentifier()),
+        (trailing + "ClassVar", ("a" + trailing).isidentifier()),
+    ):
+        _assert_boundary_matches_python(text, part_of_a_longer_name)
+
+
+def _assert_boundary_matches_python(text: str, part_of_a_longer_name: bool) -> None:
 
     try:
         type(Struct)("Boundary", (Struct,), {"__annotations__": {"v": text}})
@@ -307,7 +313,7 @@ def test_the_boundary_agrees_with_python_about_identifiers(trailing):
     except TypeError:
         refused = True
 
-    assert refused is not part_of_a_longer_name
+    assert refused is not part_of_a_longer_name, text
 
 
 def test_a_failing_origin_probe_fails_the_class():
@@ -336,3 +342,25 @@ def test_a_failing_origin_probe_fails_the_class():
     Ordinary = type(Struct)("Ordinary", (Struct,), {"__annotations__": {"v": Quiet()}})
 
     assert Ordinary.__struct_fields__ == ("v",)
+
+
+def test_the_object_path_is_skipped_when_neither_module_is_loaded(monkeypatch):
+    """salix imports neither typing nor dataclasses, so on a bare interpreter
+    both probes come back absent and no annotation object can be either form.
+    The walk is skipped entirely, and an ordinary class still builds.
+    """
+
+    monkeypatch.delitem(sys.modules, "typing", raising=False)
+    monkeypatch.delitem(sys.modules, "dataclasses", raising=False)
+
+    probed = []
+
+    class Watched:
+        def __getattr__(self, name: str) -> object:
+            probed.append(name)
+            raise AttributeError(name)
+
+    Ordinary = type(Struct)("Ordinary", (Struct,), {"__annotations__": {"v": Watched()}})
+
+    assert Ordinary.__struct_fields__ == ("v",)
+    assert probed == []

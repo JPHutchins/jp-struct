@@ -199,10 +199,10 @@ static enum result append_declared(
 		 * the no-op it has always been rather than a new refusal. */
 		struct special_form const special = special_form_of(annotation, class_var, init_var);
 
-		/* Naming no form is the ordinary answer, but so is failing to look --
-		 * the text path allocates, and an allocation that failed must not read
-		 * as "this is a field". */
-		if (special.name == NULL && PyErr_Occurred()) {
+		/* Before the answer is used at all, not only when it is "no form": the
+		 * text path allocates on the way to either verdict, and a failure there
+		 * must not be overwritten by a refusal that happens to agree. */
+		if (PyErr_Occurred()) {
 			return RESULT_ERROR;
 		}
 
