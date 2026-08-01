@@ -21,7 +21,10 @@ PyObject * struct_annotations(PyObject * const namespace) {
 		return Py_NewRef(declared);
 	}
 
-	PyObject * const annotate = borrow_annotate(namespace);
+	/* Owned rather than borrowed: on 3.14+ evaluate imports a module, which runs
+	 * arbitrary Python the first time, and the namespace this came out of is
+	 * within that code's reach. */
+	PY_OWNED(annotate, Py_XNewRef(borrow_annotate(namespace)));
 
 	if (annotate == NULL) {
 		return PyDict_New();
@@ -41,27 +44,30 @@ static PyObject * borrow_annotate(PyObject * const namespace) {
  * bare forward reference, which is all we need since we only read the field
  * *names* and *order* here. Only annotationlib can deliver it -- a generated
  * __annotate__ implements VALUE and answers NotImplementedError to the rest --
- * so the call goes through the helper rather than the function itself. */
+ * so the call goes through the helper rather than the function itself.
+ *
+ * Chosen at compile time rather than probed at runtime. annotationlib is stdlib
+ * from 3.14; below that, importing the name would find whatever a user happens
+ * to have on sys.path and call a function of the same name on it. An older
+ * interpreter has no PEP 649 either, so an __annotate__ in the namespace is one
+ * the class body wrote, and VALUE is what calling it means. Where the module is
+ * stdlib, a failure to import it is a broken interpreter and says so. */
 static PyObject * evaluate(PyObject * const annotate) {
+#if PY_VERSION_HEX < 0x030E0000
+	return PyObject_CallFunction(annotate, "i", ANNOTATION_FORMAT_VALUE);
+#else
 	PY_OWNED(annotationlib, PyImport_ImportModule("annotationlib"));
 
-	if (annotationlib != NULL) {
-		return PyObject_CallMethod(
-			annotationlib,
-			"call_annotate_function",
-			"Oi",
-			annotate,
-			ANNOTATION_FORMAT_FORWARDREF
-		);
-	}
-
-	if (!PyErr_ExceptionMatches(PyExc_ImportError)) {
+	if (annotationlib == NULL) {
 		return NULL;
 	}
 
-	/* No annotationlib means no PEP 649, so this __annotate__ is one the class
-	 * body wrote by hand and a direct call is the only way to reach it. */
-	PyErr_Clear();
-
-	return PyObject_CallFunction(annotate, "i", ANNOTATION_FORMAT_VALUE);
+	return PyObject_CallMethod(
+		annotationlib,
+		"call_annotate_function",
+		"Oi",
+		annotate,
+		ANNOTATION_FORMAT_FORWARDREF
+	);
+#endif
 }

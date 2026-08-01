@@ -2,7 +2,7 @@
 
 A field is a name and a position; the annotation beside it is never a type as
 far as salix is concerned. PEP 649 is what makes that distinction reachable,
-and every test here is a case where resolving would have failed.
+and every test in the class below is a case where resolving would have failed.
 """
 
 import sys
@@ -11,70 +11,80 @@ import pytest
 
 from salix import Struct
 
-pytestmark = pytest.mark.skipif(
-    sys.version_info < (3, 14), reason="before PEP 649 an annotation is evaluated where it is written"
+
+def test_a_hand_written_annotate_is_called_directly():
+    """The only path an interpreter without PEP 649 has: no __annotations__ in
+    the namespace, and an __annotate__ the class body wrote itself. Outside the
+    class below because that pre-3.14 branch has nothing else covering it.
+    """
+
+    def annotate(format):
+        return {"x": int, "y": int}
+
+    Manual = type(Struct)("Manual", (Struct,), {"__annotate__": annotate})
+
+    assert Manual.__struct_fields__ == ("x", "y")
+    assert Manual(1, 2).x == 1
+
+
+@pytest.mark.skipif(
+    sys.version_info < (3, 14),
+    reason="before PEP 649 an annotation is evaluated where it is written",
 )
+class TestForwardReferences:
+    def test_a_bare_self_reference_is_a_field(self):
+        class Node(Struct):
+            value: int
+            nxt: Node = None  # noqa: F821
 
+        assert Node.__struct_fields__ == ("value", "nxt")
+        assert Node(1, Node(2)).nxt.value == 2
 
-def test_a_bare_self_reference_is_a_field():
-    class Node(Struct):
-        value: int
-        nxt: Node = None  # noqa: F821
+    def test_an_annotation_that_never_resolves_is_a_field_anyway(self):
+        class Bare(Struct):
+            x: NeverDefined  # noqa: F821
 
-    assert Node.__struct_fields__ == ("value", "nxt")
-    assert Node(1, Node(2)).nxt.value == 2
+        assert Bare.__struct_fields__ == ("x",)
+        assert Bare(1).x == 1
 
+    def test_two_classes_may_refer_to_each_other(self):
+        class Left(Struct):
+            right: Right = None  # noqa: F821
 
-def test_an_annotation_that_never_resolves_is_a_field_anyway():
-    class Bare(Struct):
-        x: NeverDefined  # noqa: F821
+        class Right(Struct):
+            left: Left = None
 
-    assert Bare.__struct_fields__ == ("x",)
-    assert Bare(1).x == 1
+        assert Left(Right()).right.left is None
 
+    def test_the_order_survives_a_mix_of_resolvable_and_not(self):
+        class Mixed(Struct):
+            first: int
+            second: Unresolvable  # noqa: F821
+            third: str
 
-def test_two_classes_may_refer_to_each_other():
-    class Left(Struct):
-        right: Right = None  # noqa: F821
+        assert Mixed.__struct_fields__ == ("first", "second", "third")
 
-    class Right(Struct):
-        left: Left = None
+    def test_a_subclass_may_forward_reference_too(self):
+        class Base(Struct):
+            x: int
 
-    assert Left(Right()).right.left is None
+        class Child(Base):
+            y: Child = None  # noqa: F821
 
+        assert Child.__struct_fields__ == ("x", "y")
 
-def test_the_order_survives_a_mix_of_resolvable_and_not():
-    class Mixed(Struct):
-        first: int
-        second: Unresolvable  # noqa: F821
-        third: str
+    def test_the_annotations_still_resolve_once_the_class_exists(self):
+        """Reading them early does not leave a ForwardRef behind for everyone else."""
 
-    assert Mixed.__struct_fields__ == ("first", "second", "third")
+        class Node(Struct):
+            nxt: Node = None  # noqa: F821
 
+        assert Node.__annotations__ == {"nxt": Node}
 
-def test_a_subclass_may_forward_reference_too():
-    class Base(Struct):
-        x: int
+    def test_an_annotation_that_fails_for_its_own_reasons_says_so(self):
+        """Not resolving a name is the exemption; arbitrary failure is not."""
 
-    class Child(Base):
-        y: Child = None  # noqa: F821
+        with pytest.raises(ZeroDivisionError):
 
-    assert Child.__struct_fields__ == ("x", "y")
-
-
-def test_the_annotations_still_resolve_once_the_class_exists():
-    """Reading them early does not leave a ForwardRef behind for everyone else."""
-
-    class Node(Struct):
-        nxt: Node = None  # noqa: F821
-
-    assert Node.__annotations__ == {"nxt": Node}
-
-
-def test_an_annotation_that_fails_for_its_own_reasons_says_so():
-    """Not resolving a name is the exemption; arbitrary failure is not."""
-
-    with pytest.raises(ZeroDivisionError):
-
-        class Broken(Struct):
-            x: 1 / 0
+            class Broken(Struct):
+                x: 1 / 0
