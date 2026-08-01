@@ -326,7 +326,17 @@ static struct special_form named_special_form(PyObject * const text) {
 	return (struct special_form){0};
 }
 
-/* The form itself, or something.Form -- and not MyClassVar or ClassVarish. */
+/*
+ * The form standing on its own somewhere in the text: at the start, after a dot
+ * for a module alias, or inside a subscript for `Annotated[ClassVar[int], ...]`.
+ * Not MyClassVar, and not ClassVarish.
+ *
+ * A heuristic in both directions, and the only thing available once the
+ * annotation is source text. It misses a renamed import -- `ClassVar as CV`
+ * gives `CV[int]` -- and it refuses a user's own type that happens to be called
+ * ClassVar. The object path, which is what runs unless the module asked for
+ * `from __future__ import annotations`, is exact and has neither problem.
+ */
 static bool names_form(char const * const source, char const * const form) {
 	size_t const length = strlen(form);
 
@@ -335,10 +345,15 @@ static bool names_form(char const * const source, char const * const form) {
 		found != NULL;
 		found = strstr(found + 1, form)
 	) {
-		bool const starts = found == source || found[-1] == '.';
+		bool const opens = (
+			found == source ||
+			found[-1] == '.' ||
+			found[-1] == '[' ||
+			found[-1] == ' '
+		);
 		char const after = found[length];
 
-		if (starts && (after == '\0' || after == '[')) {
+		if (opens && (after == '\0' || after == '[' || after == ',' || after == ']')) {
 			return true;
 		}
 	}

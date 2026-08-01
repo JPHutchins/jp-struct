@@ -101,7 +101,16 @@ def test_an_annotated_init_var_does_not_hide_the_form_either():
 
 
 @pytest.mark.parametrize(
-    "text", ["ClassVar[int]", "ClassVar", "typing.ClassVar[int]", "t.ClassVar[int]", "InitVar[int]"]
+    "text",
+    [
+        "ClassVar[int]",
+        "ClassVar",
+        "typing.ClassVar[int]",
+        "t.ClassVar[int]",
+        "InitVar[int]",
+        "Annotated[ClassVar[int], 'meta']",
+        "Annotated[InitVar[int], 'meta']",
+    ],
 )
 def test_the_source_text_form_is_refused_too(text):
     """`from __future__ import annotations` leaves the annotation as its own
@@ -112,7 +121,10 @@ def test_the_source_text_form_is_refused_too(text):
         type(Struct)("Textual", (Struct,), {"__annotations__": {"v": text}})
 
 
-@pytest.mark.parametrize("text", ["int", "MyClassVarThing", "ClassVarish", "list[int]"])
+@pytest.mark.parametrize(
+    "text",
+    ["int", "MyClassVarThing", "ClassVarish", "list[int]", "dict[str, int]", 'Annotated[int, "x"]'],
+)
 def test_a_name_that_merely_contains_the_form_is_a_field(text):
     Ordinary = type(Struct)("Ordinary", (Struct,), {"__annotations__": {"v": text}})
 
@@ -132,3 +144,14 @@ def test_re_annotating_an_inherited_field_stays_a_no_op():
 
     assert Sub.__struct_fields__ == ("x",)
     assert Sub(1).x == 1
+
+
+def test_a_renamed_import_is_not_resolved_in_the_source_text_form():
+    """`from typing import ClassVar as CV` gives `CV[int]`, which names nothing
+    the text can match. Recorded as the known hole in the heuristic rather than
+    guessed at, which is what dataclasses does against sys.modules.
+    """
+
+    Escaped = type(Struct)("Escaped", (Struct,), {"__annotations__": {"v": "CV[int]"}})
+
+    assert Escaped.__struct_fields__ == ("v",)
