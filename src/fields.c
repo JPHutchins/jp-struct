@@ -264,10 +264,12 @@ static PyObject * build_defaults(PyObject * const all_names, PyObject * const de
 		 * a set, whose copy hashes every element, which is user code running at
 		 * class definition on the way to an error.
 		 *
-		 * The second read is the one that counts, because by then nothing else
-		 * has a reference to what is being checked. A thread filling the
-		 * declaration between the two cannot reach the copy, and the copy is
-		 * what the class keeps. */
+		 * The second read is the one that counts, and it is the one whose answer
+		 * is permanent: it reads the copy, which is what the class keeps and
+		 * which nothing else can fill. A racing write is still captured by the
+		 * copy -- the copy is made from the declaration, so of course it is --
+		 * and the class refuses it. What the race costs is the work the first
+		 * check exists to skip, not a non-empty stored default. */
 		if (reject_unsafe_default(field_name, value) != RESULT_OK) {
 			Py_DECREF(defaults);
 
