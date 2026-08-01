@@ -92,6 +92,32 @@ class TestANonFunctionAnnotate:
         assert Built.__struct_fields__ == ("x", "y")
         assert Built(1, 2).y == 2
 
+    @pytest.mark.skipif(
+        sys.version_info < (3, 14),
+        reason="the escalation this drives is compiled out before 3.14",
+    )
+    def test_a_plain_function_can_reach_the_escalation_success_branch(self):
+        """The middle case, and the only one that returns through
+        `escalated != NULL` without a compiler-generated annotate.
+
+        annotationlib rebuilds the function against fake globals and calls the
+        copy with VALUE_WITH_FAKE_GLOBALS, where names resolve to stringifiers.
+        A hand-written annotate reaches this only by evaluating for that format
+        -- one that answers NotImplementedError to everything but VALUE drives
+        the failure branch instead, which is the parametrized test above.
+        """
+
+        def fake_globals_aware(format):
+            if format in (1, 2):
+                return {"x": Undefined, "y": int}  # noqa: F821 -- unresolvable on purpose
+
+            raise NotImplementedError
+
+        Built = type(Struct)("Built", (Struct,), {"__annotate__": fake_globals_aware})
+
+        assert Built.__struct_fields__ == ("x", "y")
+        assert Built(1, 2).y == 2
+
     def test_an_annotate_that_refuses_VALUE_is_refused_back(self):
         """PEP 649 makes VALUE the one format an __annotate__ must implement,
         and salix asks for it first. An older flow tried another format first

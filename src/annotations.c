@@ -50,6 +50,12 @@ static PyObject * borrow_annotate(PyObject * const namespace) {
  * directly and what all-resolvable annotations -- nearly all of them -- want.
  * Only a name that does not resolve costs anything more.
  *
+ * The rescue costs a re-evaluation, and sometimes two: annotationlib rebuilds
+ * the callable and re-runs every annotation in the dict, so a class holding one
+ * forward reference evaluates its other annotations again. Plain 3.14 evaluates
+ * once and defers. Format.STRING would avoid it -- only the keys are read here
+ * -- but the values stop being objects, and #14's ClassVar check reads them.
+ *
  * FORWARDREF is the fallback: it leaves an unresolved bare forward reference as
  * a ForwardRef instead of raising, which is all we need since only the field
  * *names* and *order* are read here. It has to come from annotationlib, since a
