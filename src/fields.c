@@ -315,6 +315,14 @@ static struct special_form special_form_of(
 		PyObject * const next = PyObject_GetAttrString(current, "__origin__");
 
 		if (next == NULL) {
+			/* Not having one is the ordinary answer and ends the walk. Anything
+			 * else is a failure to look, and the caller checks for it -- the
+			 * last place in this file that used to clear what it did not
+			 * expect. */
+			if (!PyErr_ExceptionMatches(PyExc_AttributeError)) {
+				break;
+			}
+
 			PyErr_Clear();
 
 			break;
