@@ -215,7 +215,8 @@ static enum result reject_unsafe_default(PyObject * const field_name, PyObject *
 	PyErr_Format(
 		PyExc_TypeError,
 		"field '%U' defaults to a non-empty %.100s, which every instance would "
-		"share the contents of; build it in __post_init__ with set_field",
+		"share the contents of; default it to an empty one and fill it in "
+		"__post_init__ with set_field",
 		field_name,
 		kind->tp_name
 	);

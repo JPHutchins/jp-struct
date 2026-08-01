@@ -131,12 +131,20 @@ class TestMutableDefaults:
         assert Holder().v is not Holder().v
 
     def test_an_immutable_default_is_shared(self):
+        """The int and the str are built rather than written as literals: a
+        small int and an interned literal are shared by CPython whatever salix
+        does, so asserting identity on those proves nothing.
+        """
+
         class Inner(Struct):
             a: int
 
+        uncached_number = 10**20
+        uncached_text = "not interned " * 2
+
         class Holder(Struct):
-            number: int = 5
-            text: str = "x"
+            number: int = uncached_number
+            text: str = uncached_text
             pair: tuple = (1, 2)
             nested: Inner = Inner(1)
 

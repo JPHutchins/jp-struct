@@ -208,14 +208,19 @@ static enum result fill_defaults(
  * A mutable default belongs to the instance, not to the class: `xs: list = []`
  * reads as an empty list per struct, and handing every instance the same one is
  * a bug people write by accident. The four builtins that spell "container I
- * will mutate" are copied; everything else is shared, which is what you want
- * for an int, a string, a tuple, or a frozen struct -- none of them can be
- * changed out from under another instance.
+ * will mutate" are copied, and only when empty -- a non-empty one is refused at
+ * class creation, since copying it could only be shallow.
  *
- * dataclasses refuses this shape instead, and needs default_factory to express
- * it at all. msgspec copies, and so does this: it costs the copy only on the
- * fields that have one, and it makes the common spelling mean what it looks
- * like it means.
+ * Everything else is shared. That is right for an int, a string or a tuple of
+ * them, and for a frozen struct of them: none can be rebound or mutated. It is
+ * *not* right for a shallowly-immutable container of something mutable --
+ * `([],)`, or a frozen struct holding a list -- which is shared here and whose
+ * contents therefore are too. Hashability is the test that would catch those,
+ * and #51 is where that is argued; msgspec shares them as well.
+ *
+ * dataclasses refuses the shape outright and needs default_factory to express
+ * it at all. This copies, so the common spelling means what it looks like it
+ * means, and pays for it only on the fields that have one.
  */
 static PyObject * default_for(PyObject * const declared) {
 	PyTypeObject * const kind = Py_TYPE(declared);
