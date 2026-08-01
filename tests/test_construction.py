@@ -95,9 +95,11 @@ def test_the_class_is_callable_through_the_slow_path_too():
 
 class TestMutableDefaults:
     """`xs: list = []` reads as an empty list per instance, and that is what it
-    gets. The four builtins that mean "container I will mutate" are copied at
-    construction; anything that cannot be changed out from under another
-    instance is shared, which is cheaper and indistinguishable.
+    gets. Exactly four builtins are copied at construction, and everything else
+    is shared -- which is cheaper and indistinguishable for a value that cannot
+    be mutated, and simply sharing for one that can. `array.array`, `deque`, a
+    writable `memoryview` and the subclasses of the four are all in the second
+    group; #51 argues for hashability as the test that would replace the list.
     """
 
     def test_a_list_default_is_not_shared(self):
@@ -217,6 +219,26 @@ class TestMutableDefaults:
 
             class Holder(Struct):
                 v: object = value
+
+    @pytest.mark.parametrize(
+        "value",
+        [
+            pytest.param(__import__("array").array("i", [1, 2]), id="array"),
+            pytest.param(__import__("collections").deque([1, 2]), id="deque"),
+            pytest.param(memoryview(bytearray(b"abc")), id="memoryview"),
+        ],
+    )
+    def test_a_mutable_container_outside_the_four_is_shared_and_not_refused(self, value):
+        """The boundary is the four exact types, not mutability, so these are
+        neither copied nor refused. Every one is unhashable, which is the test
+        #51 argues should replace the list.
+        """
+
+        class Holder(Struct, frozen=False):
+            v: object = value
+
+        assert Holder().v is Holder().v
+        assert Holder.__struct_defaults__[0] is value
 
     def test_a_body_init_does_not_exempt_the_declared_default(self):
         """Its constructor never reads the default, so nothing is shared -- but

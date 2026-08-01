@@ -263,17 +263,16 @@ static PyObject * build_defaults(PyObject * const all_names, PyObject * const de
 		PyObject * const field_name = PyList_GET_ITEM(all_names, i);
 		PyObject * const value = PyDict_GetItem(default_by_name, field_name);
 
-		if (reject_unsafe_default(field_name, value) != RESULT_OK) {
-			Py_DECREF(defaults);
-
-			return NULL;
-		}
-
-		/* Empty now and no longer anyone else's to fill: what the class stores
-		 * is its own, so the emptiness this just checked is permanent. */
+		/* Copy first and check the copy, not the declaration. The two are
+		 * separate reads of an object the module still holds, and on a
+		 * free-threaded build another thread can fill it in between -- so what
+		 * is checked has to be the thing that is kept. Once kept it is the
+		 * class's own and nobody can fill it, which is what makes the emptiness
+		 * permanent rather than momentary. */
 		PyObject * const stored = struct_default_copy(value);
 
-		if (stored == NULL) {
+		if (stored == NULL || reject_unsafe_default(field_name, stored) != RESULT_OK) {
+			Py_XDECREF(stored);
 			Py_DECREF(defaults);
 
 			return NULL;

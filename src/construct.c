@@ -216,12 +216,18 @@ static enum result fill_defaults(
  * and every instance would get a shallow copy of it. msgspec severs the same
  * alias by turning the default into a Factory.
  *
- * Everything else is shared. That is right for an int, a string or a tuple of
- * them, and for a frozen struct of them: none can be rebound or mutated. It is
- * *not* right for a shallowly-immutable container of something mutable --
- * `([],)`, or a frozen struct holding a list -- which is shared here and whose
- * contents therefore are too. Hashability is the test that would catch those,
- * and #51 is where that is argued; msgspec shares them as well.
+ * Everything else is shared, and "everything else" is wider than it sounds.
+ * Sharing is right for an int, a string or a tuple of them, and for a frozen
+ * struct of them: none can be rebound or mutated. It is wrong for two kinds of
+ * default this does not reach -- a shallowly-immutable container of something
+ * mutable (`([],)`, a frozen struct holding a list), and a mutable container
+ * that simply is not one of the four (`array.array`, `deque`, `defaultdict`, a
+ * writable `memoryview`, or a subclass of any of the four). Those are shared
+ * outright, and a non-empty one is not refused either, because the refusal
+ * whitelists the same four types.
+ *
+ * Every one of them is unhashable, which is the single test that would replace
+ * this list; #51 is where that is argued. msgspec shares them as well.
  *
  * dataclasses refuses the shape outright and needs default_factory to express
  * it at all. This copies, so the common spelling means what it looks like it
