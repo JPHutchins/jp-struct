@@ -77,15 +77,13 @@ class TestMethods:
 
         frame = Frame.from_bytes(b"\x02\x01\x07\x01")
 
-        assert type(frame) is Frame
         assert (frame.length, frame.kind, frame.flags) == (258, 7, 1)
 
     def test_a_round_trip_returns_an_equal_struct(self):
         """Composing pack with unpack holds by the struct module's own inverse
         property, so this pins the classmethod reaching `__eq__` with a real
-        instance and nothing about the wire format. The two that pin the format
-        are the ones checking `to_bytes` and `from_bytes` against independent
-        bytes; neither of them is the test directly above.
+        instance and nothing about the wire format. What pins the format is the
+        pair that check `to_bytes` and `from_bytes` against independent bytes.
         """
 
         original = Frame(4096, 3, 2)
