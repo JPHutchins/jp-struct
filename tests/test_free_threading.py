@@ -11,7 +11,7 @@ import threading
 
 import pytest
 
-from salix import Struct
+from salix import Struct, set_field
 
 pytestmark = pytest.mark.skipif(
     not sysconfig.get_config_var("Py_GIL_DISABLED"), reason="not a free-threaded build"
@@ -89,6 +89,30 @@ def test_concurrent_writes_to_a_shared_mutable_struct():
         for i in range(ITERATIONS):
             shared.value = i
             assert isinstance(shared.value, int)
+
+    run_on_every_thread(work)
+
+
+def test_concurrent_set_field_on_a_shared_frozen_struct():
+    """The write path the descriptor test above does not cover, and the one that
+    used to take the interpreter with it: eight threads writing one slot with a
+    plain load-store-decref release the same previous value twice.
+
+    The initial value is one element and every written one is two, so a
+    set_field that quietly stopped writing would fail the assertion rather than
+    pass on the value it started with.
+    """
+
+    class Holder(Struct):
+        value: object
+
+    shared = Holder([0])
+
+    def work():
+        for i in range(ITERATIONS):
+            set_field(shared, "value", [i, i])
+
+            assert len(shared.value) == 2
 
     run_on_every_thread(work)
 

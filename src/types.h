@@ -4,9 +4,17 @@
 
 #include "options.h"
 
-/* PyMemberDef only became visible through Python.h in 3.12. */
+/* PyMemberDef only became visible through Python.h in 3.12, and the member
+ * type constants gained their Py_ prefix in the same move. Both halves of that
+ * rename live here, so the whole adaptation goes away together whenever the
+ * floor reaches 3.12. SLOT_MEMBER_TYPE is what type.__new__ makes a __slots__
+ * entry, and so what addresses one by offset. */
 #if PY_VERSION_HEX < 0x030C0000
 #	include <structmember.h>
+
+enum { SLOT_MEMBER_TYPE = T_OBJECT_EX };
+#else
+enum { SLOT_MEMBER_TYPE = Py_T_OBJECT_EX };
 #endif
 
 /* An instance of StructMeta *is* a struct class.  We extend the heap-type
