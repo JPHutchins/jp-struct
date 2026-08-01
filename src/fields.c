@@ -1,5 +1,6 @@
 #include <Python.h>
 #include <stdbool.h>
+#include <string.h>
 
 #include "annotations.h"
 #include "fields.h"
@@ -35,8 +36,14 @@ static enum result append_declared(
 static PyObject * build_defaults(PyObject * all_names, PyObject * default_by_name);
 static PyObject * checked_annotations(PyObject * namespace);
 static enum inheritance inherits_field(StructType const * base, PyObject * field_name);
-static struct special_form special_form_of(PyObject * annotation);
-static PyObject * borrow_attribute(char const * module_name, char const * attribute);
+static struct special_form special_form_of(
+	PyObject * annotation,
+	PyObject * class_var,
+	PyObject * init_var
+);
+static struct special_form named_special_form(PyObject * text);
+static bool names_form(char const * source, char const * form);
+static PyObject * module_attribute(char const * module_name, char const * attribute);
 
 /* The plan only takes references once every step has succeeded; the working
  * collections belong to this scope either way. */
@@ -137,23 +144,14 @@ static enum result append_declared(
 	PyObject * annotation;
 	Py_ssize_t position = 0;
 
+	/* Once per class, not once per field. Absent means the module was never
+	 * imported, so nothing in this body can be naming what it holds. */
+	PY_OWNED(class_var, module_attribute("typing", "ClassVar"));
+	PY_OWNED(init_var, module_attribute("dataclasses", "InitVar"));
+
 	while (PyDict_Next(annotations, &position, &field_name, &annotation)) {
 		if (!PyUnicode_CheckExact(field_name)) {
 			PyErr_SetString(PyExc_TypeError, "annotation keys must be strings");
-
-			return RESULT_ERROR;
-		}
-
-		struct special_form const special = special_form_of(annotation);
-
-		if (special.name != NULL) {
-			PyErr_Format(
-				PyExc_TypeError,
-				"'%U' is annotated %s, which salix does not support; %s",
-				field_name,
-				special.name,
-				special.instead
-			);
 
 			return RESULT_ERROR;
 		}
@@ -177,6 +175,22 @@ static enum result append_declared(
 				continue;
 			case INHERITANCE_NEW:
 				break;
+		}
+
+		/* After the inheritance check, so re-annotating an inherited field is
+		 * the no-op it has always been rather than a new refusal. */
+		struct special_form const special = special_form_of(annotation, class_var, init_var);
+
+		if (special.name != NULL) {
+			PyErr_Format(
+				PyExc_TypeError,
+				"'%U' is annotated %s, which salix does not support; %s",
+				field_name,
+				special.name,
+				special.instead
+			);
+
+			return RESULT_ERROR;
 		}
 
 		if (PyList_Append(all_names, field_name) < 0 || PyList_Append(new_names, field_name) < 0) {
@@ -216,36 +230,93 @@ static enum inheritance inherits_field(StructType const * const base, PyObject *
  * positional argument and checked code and running code disagree about what it
  * means. Refused instead, until there is a way to ask for them.
  *
- * Nothing is imported to find out. A module nobody imported cannot have
- * supplied the annotation, so an absent `typing` answers the question for free
- * -- which is the common case, since a bare interpreter has neither of these
- * loaded. The same trick dataclasses uses, for the same reason.
- *
- * Only the object form is recognised. Under `from __future__ import
- * annotations` the annotation is the source text, and matching that means
- * guessing at import aliases; dataclasses guesses, and this does not.
+ * The __origin__ chain is walked rather than probed once, because
+ * Annotated[ClassVar[int], ...] reaches ClassVar two hops down and is otherwise
+ * the same bug wearing a wrapper. Bounded, so a self-referential __origin__
+ * cannot spin here.
  */
-static struct special_form special_form_of(PyObject * const annotation) {
-	PyObject * const class_var = borrow_attribute("typing", "ClassVar");
+enum : int {
+	SPECIAL_FORM_HOPS = 4,
+};
 
-	if (class_var != NULL) {
-		PY_OWNED(origin, PyObject_GetAttrString(annotation, "__origin__"));
+static struct special_form special_form_of(
+	PyObject * const annotation,
+	PyObject * const class_var,
+	PyObject * const init_var
+) {
+	if (PyUnicode_Check(annotation)) {
+		return named_special_form(annotation);
+	}
 
-		if (origin == NULL) {
-			PyErr_Clear();
-		}
+	PyObject * current = annotation;
 
-		if (annotation == class_var || origin == class_var) {
+	PY_MOVABLE(held, NULL);
+
+	for (int hop = 0; hop < SPECIAL_FORM_HOPS; ++hop) {
+		if (class_var != NULL && current == class_var) {
 			return (struct special_form){
 				.name = "ClassVar",
 				.instead = "write it below the fields, without an annotation",
 			};
 		}
+
+		if (
+			init_var != NULL &&
+			(current == init_var || (PyObject *) Py_TYPE(current) == init_var)
+		) {
+			return (struct special_form){
+				.name = "InitVar",
+				.instead = "take the value in a custom __init__ and write the fields with set_field",
+			};
+		}
+
+		/* A plain class is the common annotation and has no __origin__; asking
+		 * anyway costs an AttributeError raised and cleared per field. */
+		if (PyType_Check(current)) {
+			break;
+		}
+
+		PyObject * const next = PyObject_GetAttrString(current, "__origin__");
+
+		if (next == NULL) {
+			PyErr_Clear();
+
+			break;
+		}
+
+		Py_XSETREF(held, next);
+		current = held;
 	}
 
-	PyObject * const init_var = borrow_attribute("dataclasses", "InitVar");
+	return (struct special_form){0};
+}
 
-	if (init_var != NULL && (PyObject *) Py_TYPE(annotation) == init_var) {
+/*
+ * Under `from __future__ import annotations` the annotation is its own source
+ * text, so the only thing left to match is the spelling. A module alias is
+ * covered, since `t.ClassVar[int]` still ends in the form after a dot; a
+ * *renamed* import is not -- `from typing import ClassVar as CV` gives
+ * `CV[int]`, which resolves to nothing here and becomes a field, as it did
+ * before any of this. dataclasses guesses at those against sys.modules; this
+ * does not.
+ */
+static struct special_form named_special_form(PyObject * const text) {
+	char const * const source = PyUnicode_AsUTF8(text);
+
+	if (source == NULL) {
+		PyErr_Clear();
+
+		return (struct special_form){0};
+	}
+
+	if (names_form(source, "ClassVar")) {
+		return (struct special_form){
+			.name = "ClassVar",
+			.instead = "write it below the fields, without an annotation",
+		};
+	}
+
+	if (names_form(source, "InitVar")) {
 		return (struct special_form){
 			.name = "InitVar",
 			.instead = "take the value in a custom __init__ and write the fields with set_field",
@@ -255,13 +326,33 @@ static struct special_form special_form_of(PyObject * const annotation) {
 	return (struct special_form){0};
 }
 
+/* The form itself, or something.Form -- and not MyClassVar or ClassVarish. */
+static bool names_form(char const * const source, char const * const form) {
+	size_t const length = strlen(form);
+
+	for (
+		char const * found = strstr(source, form);
+		found != NULL;
+		found = strstr(found + 1, form)
+	) {
+		bool const starts = found == source || found[-1] == '.';
+		char const after = found[length];
+
+		if (starts && (after == '\0' || after == '[')) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
 /*
  * The attribute if its module is already loaded, and NULL if it is not --
- * without importing, which is the whole point. Borrowed: sys.modules holds the
- * module and the module holds the attribute, both for longer than a class
- * body lasts.
+ * without importing, which is the whole point. A new reference, so the caller
+ * owns it: returning a borrowed one out of a PY_OWNED scope is the shape
+ * owned.h warns about, even where the module would have kept it alive.
  */
-static PyObject * borrow_attribute(char const * const module_name, char const * const attribute) {
+static PyObject * module_attribute(char const * const module_name, char const * const attribute) {
 	PY_OWNED(name, PyUnicode_FromString(module_name));
 
 	if (name == NULL) {
@@ -273,15 +364,15 @@ static PyObject * borrow_attribute(char const * const module_name, char const * 
 	PY_OWNED(module, PyImport_GetModule(name));
 
 	if (module == NULL) {
-		return NULL;
-	}
-
-	PY_OWNED(found, PyObject_GetAttrString(module, attribute));
-
-	if (found == NULL) {
 		PyErr_Clear();
 
 		return NULL;
+	}
+
+	PyObject * const found = PyObject_GetAttrString(module, attribute);
+
+	if (found == NULL) {
+		PyErr_Clear();
 	}
 
 	return found;

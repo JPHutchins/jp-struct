@@ -6,8 +6,9 @@ to disagree about what the first positional argument means, so they are refused
 until there is a way to ask for them.
 """
 
+import sys
 from dataclasses import InitVar
-from typing import ClassVar, Final
+from typing import Annotated, ClassVar, Final
 
 import pytest
 
@@ -67,3 +68,67 @@ def test_a_field_named_after_the_form_is_still_a_field():
 
     assert Named.__struct_fields__ == ("ClassVar", "InitVar")
     assert Named().ClassVar == 1
+
+
+def test_a_bare_init_var_is_refused_like_a_bare_class_var():
+    """`InitVar` unsubscripted is the class itself, not an instance of it."""
+
+    with pytest.raises(TypeError, match="annotated InitVar"):
+
+        class Seeded(Struct):
+            seed: InitVar
+
+
+def test_an_annotated_class_var_does_not_hide_the_form():
+    """Annotated reaches the form two hops down __origin__, and wrapping it was
+    otherwise the same position-swallowing bug wearing a wrapper.
+    """
+
+    with pytest.raises(TypeError, match="annotated ClassVar"):
+        type(Struct)(
+            "Wrapped", (Struct,), {"__annotations__": {"v": Annotated[ClassVar[int], "meta"]}}
+        )
+
+
+@pytest.mark.skipif(
+    sys.version_info < (3, 11), reason="typing refuses Annotated[InitVar[...]] before 3.11"
+)
+def test_an_annotated_init_var_does_not_hide_the_form_either():
+    annotation = Annotated[InitVar[int], "meta"]
+
+    with pytest.raises(TypeError, match="annotated InitVar"):
+        type(Struct)("Wrapped", (Struct,), {"__annotations__": {"v": annotation}})
+
+
+@pytest.mark.parametrize(
+    "text", ["ClassVar[int]", "ClassVar", "typing.ClassVar[int]", "t.ClassVar[int]", "InitVar[int]"]
+)
+def test_the_source_text_form_is_refused_too(text):
+    """`from __future__ import annotations` leaves the annotation as its own
+    source, where the spelling is all there is to go on.
+    """
+
+    with pytest.raises(TypeError, match="salix does not support"):
+        type(Struct)("Textual", (Struct,), {"__annotations__": {"v": text}})
+
+
+@pytest.mark.parametrize("text", ["int", "MyClassVarThing", "ClassVarish", "list[int]"])
+def test_a_name_that_merely_contains_the_form_is_a_field(text):
+    Ordinary = type(Struct)("Ordinary", (Struct,), {"__annotations__": {"v": text}})
+
+    assert Ordinary.__struct_fields__ == ("v",)
+
+
+def test_re_annotating_an_inherited_field_stays_a_no_op():
+    """The guard runs after the inheritance check, so this is what it always
+    was -- no new slot, no swallowed argument, and now no new refusal either.
+    """
+
+    class Base(Struct):
+        x: int
+
+    class Sub(Base):
+        x: ClassVar[int]
+
+    assert Sub.__struct_fields__ == ("x",)
+    assert Sub(1).x == 1
