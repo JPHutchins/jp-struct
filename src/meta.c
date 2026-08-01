@@ -214,8 +214,14 @@ PyObject * StructMeta_new(
 		NULL
 	);
 
+	/* Already installed means type.__new__ delegated to a more derived metatype,
+	 * which re-entered here and built the class in full -- or a metaclass __new__
+	 * handed back a struct class it did not just make. Installing over either one
+	 * overwrites a field table without releasing it, and the plan that produced
+	 * it came from this same name, bases and namespace anyway. */
 	if (
 		struct_class != NULL &&
+		struct_class->struct_field_names == NULL &&
 		install_fields(
 				struct_class,
 				base,

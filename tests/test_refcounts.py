@@ -247,3 +247,34 @@ def test_a_refused_set_field_takes_nothing():
         set_field(pair, "absent", value)
 
     assert sys.getrefcount(value) == before
+
+
+def test_a_delegating_metatype_installs_the_field_table_once():
+    """`type.__new__` hands off to the most derived metatype, which re-enters
+    StructMeta.__new__ and builds the class in full. The outer call used to
+    install a second field table over the first, releasing nothing -- one leaked
+    __post_init__, defaults tuple and slot-offset array per class.
+    """
+
+    import salix
+
+    class Derived(salix.StructMeta):
+        pass
+
+    def post_init(self):
+        pass
+
+    class Base(Struct, metaclass=Derived):
+        x: int
+        __post_init__ = post_init
+
+    namespace = {"__annotations__": {"y": int}, "__post_init__": post_init}
+    before = sys.getrefcount(post_init)
+    built = salix.StructMeta("Built", (Base,), namespace)
+
+    assert built.__struct_fields__ == ("x", "y")
+    assert built(1, 2).y == 2
+
+    # One for the namespace dict, one for the class that resolved it. A second
+    # install would take a third and never give it back.
+    assert sys.getrefcount(post_init) - before == 2
