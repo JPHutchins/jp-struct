@@ -67,12 +67,22 @@ class TestMethods:
         assert Frame(258, 7, 1).to_string() == "07:0102:01"
 
     def test_a_classmethod_constructs_through_the_generated_constructor(self):
-        frame = Frame.from_bytes(HEADER.pack(258, 7, 1))
+        """Fed the same independent bytes `to_bytes` is checked against, so the
+        two directions are pinned separately rather than against each other.
+        """
 
-        assert frame == Frame(258, 7, 1)
+        frame = Frame.from_bytes(b"\x02\x01\x07\x01")
+
+        assert (frame.length, frame.kind, frame.flags) == (258, 7, 1)
         assert isinstance(frame, Frame)
 
     def test_a_round_trip_returns_an_equal_struct(self):
+        """Composing pack with unpack holds by the struct module's own inverse
+        property, so this pins the classmethod reaching `__eq__` with a real
+        instance and nothing about the wire format -- the two tests above are
+        what would catch `<HBB` changing.
+        """
+
         original = Frame(4096, 3, 2)
 
         assert Frame.from_bytes(original.to_bytes()) == original
@@ -142,6 +152,7 @@ class TestInheritedMethods:
 
         tagged = Tagged(258, 7, 1, 9)
 
+        assert tagged.tag == 9
         assert tagged.header_size() == 4
         assert tagged.is_empty is False
         assert tagged.to_string() == "07:0102:01"
@@ -164,6 +175,31 @@ class TestInheritedMethods:
 
 
 class TestCaching:
+    """Where a computed value can live, given no instance dict.
+
+    Filling a declared field from `__post_init__` with `set_field` is the other
+    answer and the one salix supports; test_post_init.py pins it, including that
+    the hook runs exactly once per construction.
+    """
+
+    @staticmethod
+    def counted_cache():
+        """A fresh struct and the call log of its cached method. Fresh per test,
+        because `functools.cache` outlives the instances that filled it.
+        """
+
+        calls: list[int] = []
+
+        class Computed(Struct):
+            x: int
+
+            @functools.cache  # noqa: B019 -- the lifetime cost is the point
+            def slow(self) -> int:
+                calls.append(1)
+                return self.x * 100
+
+        return Computed, calls
+
     def test_functools_cached_property_is_not_supported(self):
         """A struct's fields are its slots and it has no instance dict, so there
         is nowhere for cached_property to put the value.
@@ -185,50 +221,12 @@ class TestCaching:
         with pytest.raises(TypeError, match="No '__dict__' attribute"):
             _ = Cached(2).expensive
 
-    def test_a_field_is_the_place_to_cache_instead(self):
-        """The cache is a declared field, and __post_init__ fills it through the
-        frozen wall.
-
-        A slotted dataclass can do this too -- directly when it is mutable, and
-        through `object.__setattr__` when it is frozen. What set_field buys is
-        that it is the supported path rather than an escape hatch around the
-        class's own rules.
-
-        test_post_init.py pins the mechanism; what is here is the caching claim
-        -- that the value is computed once, at construction, and read from a
-        slot afterwards.
-        """
-
-        calls = []
-
-        class Cached(Struct):
-            x: int
-            expensive: int = 0
-
-            def __post_init__(self) -> None:
-                calls.append(1)
-                set_field(self, "expensive", self.x * 100)
-
-        instance = Cached(2)
-
-        assert [instance.expensive for _ in range(3)] == [200, 200, 200]
-        assert len(calls) == 1
-
     def test_functools_cache_on_a_method_still_works(self):
         """It caches on the function rather than the instance, so the absent
         __dict__ is not in its way -- at the cost of holding the struct alive.
         """
 
-        calls = []
-
-        class Computed(Struct):
-            x: int
-
-            @functools.cache  # noqa: B019 -- the lifetime cost is the point
-            def slow(self) -> int:
-                calls.append(1)
-                return self.x * 100
-
+        Computed, calls = self.counted_cache()
         instance = Computed(2)
 
         assert instance.slow() == 200
@@ -241,16 +239,7 @@ class TestCaching:
         the fields, and wrong the moment the method reads anything else.
         """
 
-        calls = []
-
-        class Computed(Struct):
-            x: int
-
-            @functools.cache  # noqa: B019 -- the lifetime cost is the point
-            def slow(self) -> int:
-                calls.append(1)
-                return self.x * 100
-
+        Computed, calls = self.counted_cache()
         first, second = Computed(2), Computed(2)
 
         assert first is not second
