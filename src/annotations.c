@@ -129,8 +129,11 @@ static PyObject * evaluate(PyObject * const annotate) {
 			 * name instead. */
 			if (failure != NULL && !PyErr_GivenExceptionMatches(failure, PyExc_Exception)) {
 				/* The exit wins, but the name still says which annotation the
-				 * rescue was for, so it goes behind rather than nowhere. */
-				if (PyException_GetContext(failure) == NULL) {
+				 * rescue was for, so it goes behind rather than nowhere. Held,
+				 * not tested in place: GetContext hands back a reference. */
+				PY_OWNED(already, PyException_GetContext(failure));
+
+				if (already == NULL) {
 					PyException_SetContext(failure, py_move(&unresolved));
 				}
 
