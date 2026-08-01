@@ -164,16 +164,17 @@ def test_the_source_text_form_is_refused_too(text, form):
         "ClassVaré",
         "ÄClassVar",
         "ClassVar\u0301",
+        "ClassVar\u00b7",
     ],
 )
 def test_a_name_that_merely_contains_the_form_is_a_field(text):
     """The boundary is an identifier character on either side, so widening what
     counts as a separator must not widen what counts as the form.
 
-    The last four are legal identifiers under PEP 3131 -- the final one ends in a
-    combining acute, which continues an identifier without being a letter. Read
-    as UTF-8 rather than as characters, none of them is ASCII alphanumeric, so a
-    byte-level boundary saw the form standing on its own inside one name.
+    The last five are legal identifiers under PEP 3131, and the last two are why
+    the boundary asks Python rather than a table: a combining acute and a middle
+    dot both continue an identifier without being letters, which is the kind of
+    character a hand-written rule gets wrong in the silent direction.
     """
 
     Ordinary = type(Struct)("Ordinary", (Struct,), {"__annotations__": {"v": text}})
@@ -263,3 +264,47 @@ def test_a_real_future_annotations_module_still_builds_ordinary_fields():
 
     assert Frame.__struct_fields__ == ("length", "tag")  # type: ignore[attr-defined]
     assert Frame(1).tag == "x"  # type: ignore[operator]
+
+
+@pytest.mark.skipif(
+    sys.version_info < (3, 11),
+    reason="typing refuses a bare special form as an Annotated argument before 3.11",
+)
+@pytest.mark.parametrize("form", [ClassVar, InitVar])
+def test_a_bare_form_inside_annotated_is_refused_on_the_object_path(form):
+    """`Annotated[ClassVar, 'meta']` -- the form unsubscripted, one hop down.
+    The subscripted shape is covered above; this is the one where `__origin__`
+    reaches the form object itself rather than a `_GenericAlias` of it.
+    """
+
+    with pytest.raises(TypeError, match="salix does not support"):
+        type(Struct)("Wrapped", (Struct,), {"__annotations__": {"v": Annotated[form, "meta"]}})
+
+
+@pytest.mark.parametrize(
+    "trailing",
+    ["́", "·", "‌", "‍", "々", "s", "_", "1", " ", "[", "€"],
+    ids=["acute", "middot", "zwnj", "zwj", "iteration-mark", "letter", "underscore",
+         "digit", "space", "bracket", "euro"],
+)
+def test_the_boundary_agrees_with_python_about_identifiers(trailing):
+    """Not a table of expected answers: the assertion is that salix reaches the
+    same verdict `str.isidentifier` does, on whatever interpreter is running.
+
+    That matters because the answer moves. CPython made ZWNJ and ZWJ continue an
+    identifier in 3.13, so `ClassVar‌` is one name there and two tokens on
+    3.12 -- and salix refuses it on 3.12 and accepts it on 3.13 for exactly the
+    right reason. A hardcoded expectation here would pin one of those and call
+    the other a bug.
+    """
+
+    text = "ClassVar" + trailing
+    part_of_a_longer_name = ("a" + trailing).isidentifier()
+
+    try:
+        type(Struct)("Boundary", (Struct,), {"__annotations__": {"v": text}})
+        refused = False
+    except TypeError:
+        refused = True
+
+    assert refused is not part_of_a_longer_name

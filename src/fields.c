@@ -199,6 +199,13 @@ static enum result append_declared(
 		 * the no-op it has always been rather than a new refusal. */
 		struct special_form const special = special_form_of(annotation, class_var, init_var);
 
+		/* Naming no form is the ordinary answer, but so is failing to look --
+		 * the text path allocates, and an allocation that failed must not read
+		 * as "this is a field". */
+		if (special.name == NULL && PyErr_Occurred()) {
+			return RESULT_ERROR;
+		}
+
 		if (special.name != NULL) {
 			PyErr_Format(
 				PyExc_TypeError,
@@ -359,6 +366,10 @@ static struct special_form named_special_form(PyObject * const text) {
  * surrogate or an embedded NUL is nothing special -- neither has to survive an
  * encode that the guard would otherwise fail open on.
  *
+ * Nothing here clears an error it did not expect. A failed allocation would
+ * otherwise answer "not a form", which reads as "this is a field" -- the same
+ * fail-open module_attribute had, in the path that decides the same question.
+ *
  * A heuristic in both directions, and the only thing available once the
  * annotation is source text. It misses a renamed import -- `ClassVar as CV`
  * gives `CV[int]` -- and it refuses a user's own type that happens to be called
@@ -380,8 +391,6 @@ static bool continues_identifier(Py_UCS4 const character) {
 		PyUnicode_WriteChar(probe, 0, 'a') < 0 ||
 		PyUnicode_WriteChar(probe, 1, character) < 0
 	) {
-		PyErr_Clear();
-
 		return false;
 	}
 
@@ -392,8 +401,6 @@ static bool names_form(PyObject * const text, char const * const form) {
 	PY_OWNED(needle, PyUnicode_FromString(form));
 
 	if (needle == NULL) {
-		PyErr_Clear();
-
 		return false;
 	}
 
@@ -404,8 +411,6 @@ static bool names_form(PyObject * const text, char const * const form) {
 		Py_ssize_t const found = PyUnicode_Find(text, needle, at, length, 1);
 
 		if (found < 0) {
-			PyErr_Clear();
-
 			return false;
 		}
 
