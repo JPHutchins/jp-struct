@@ -61,8 +61,10 @@ class Frame(Struct):
 class TestMethods:
     def test_an_instance_method_reads_the_fields(self):
         """The expected bytes written out rather than re-derived from `to_bytes`'
-        own expression, so the assertion depends on the field values reaching
-        the method in the right order and not merely on reaching it.
+        own expression, so a wrong field order fails here instead of shifting
+        both sides together. An inert method returning the same constant would
+        pass; `test_a_round_trip_returns_an_equal_struct` is what needs the
+        fields.
         """
 
         assert Frame(258, 7, 1).to_bytes() == b"\x02\x01\x07\x01"
@@ -135,8 +137,35 @@ class TestMethods:
 
         assert repr(instance) == "custom repr"
         assert instance.x == 10
-        assert Custom(1) == Custom(1)
-        assert hash(Custom(1)) == hash((10,))
+        assert instance == Custom(1)
+        assert hash(instance) == hash((10,))
+
+    def test_a_body_eq_and_hash_displace_the_generated_ones(self):
+        """The header says the body keeps the dunders salix would have written,
+        and these are the two a body is most likely to want back.
+
+        `__ne__` does not come with `__eq__`, which is #58: salix binds the
+        mixin's, so `a == b` and `a != b` are both true here. A dataclass and a
+        plain class both derive `!=` from the body's `__eq__` and disagree with
+        salix on the second assertion below. Pinned as it is, so the fix has to
+        come back and change this line.
+        """
+
+        class Loose(Struct):
+            x: int
+
+            def __eq__(self, other: object) -> bool:
+                return isinstance(other, Loose)
+
+            def __hash__(self) -> int:
+                return 0
+
+        first, second = Loose(1), Loose(2)
+
+        assert first == second
+        assert first != second  # #58: both are true, and that is the bug
+        assert hash(first) == hash(Loose(99)) == 0
+        assert len({first, second}) == 1
 
     def test_the_generated_dunders_survive_alongside_them(self):
         frame = Frame(258, 7, 1)
@@ -151,11 +180,19 @@ class TestMethods:
 
 
 class TestInheritedMethods:
-    def test_a_subclass_inherits_them(self):
+    """`Tagged` is the one subclass these share: declared once, so a change to
+    Frame's fields lands in one place.
+    """
+
+    @staticmethod
+    def tagged_subclass():
         class Tagged(Frame):
             tag: int = 0
 
-        tagged = Tagged(258, 7, 1, 9)
+        return Tagged
+
+    def test_a_subclass_inherits_them(self):
+        tagged = self.tagged_subclass()(258, 7, 1, 9)
 
         assert tagged.tag == 9
         assert tagged.header_size() == 4
@@ -170,9 +207,7 @@ class TestInheritedMethods:
         assert Loud(258, 10, 1).to_string() == "0A:0102:01"
 
     def test_a_classmethod_on_a_subclass_builds_the_subclass(self):
-        class Tagged(Frame):
-            tag: int = 0
-
+        Tagged = self.tagged_subclass()
         built = Tagged.empty()
 
         assert isinstance(built, Tagged)
@@ -190,7 +225,8 @@ class TestCaching:
     @staticmethod
     def counted_cache():
         """A fresh struct and the call log of its cached method. Fresh per test,
-        because `functools.cache` outlives the instances that filled it.
+        because the cache holds its keys -- the instances -- alive, so entries
+        one test made would still answer for the next.
         """
 
         calls: list[int] = []
@@ -338,12 +374,18 @@ class TestNameCollisions:
     hands back an instance whose int field holds a function. #54 is the issue.
     """
 
-    def test_the_method_is_gone_from_the_class(self):
+    @staticmethod
+    def colliding_method():
         class Collide(Struct):
             x: int
 
             def x(self) -> str:
                 return "method"
+
+        return Collide
+
+    def test_the_method_is_gone_from_the_class(self):
+        Collide = self.colliding_method()
 
         assert type(Collide.x).__name__ == "member_descriptor"
         assert Collide(1).x == 1
@@ -353,12 +395,7 @@ class TestNameCollisions:
         argument is accepted, because the field now has a default.
         """
 
-        class Collide(Struct):
-            x: int
-
-            def x(self) -> str:
-                return "method"
-
+        Collide = self.colliding_method()
         (default,) = Collide.__struct_defaults__
 
         assert callable(default)
