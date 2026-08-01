@@ -24,7 +24,7 @@ stdenv.mkDerivation {
   buildPhase = ''
     runHook preBuild
 
-    mapfile -t cFlags < <(python3 build_config.py c-flags)
+    mapfile -t cFlags < <(python3 build_config.py c-flags --strict)
     mapfile -t sources < <(python3 build_config.py sources)
 
     $CC -DTESTING \
