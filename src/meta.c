@@ -62,6 +62,7 @@ static StructType * create_class(
 	PyObject * bases,
 	PyObject * namespace
 );
+static PyTypeObject * winning_metatype(PyTypeObject * requested, PyObject * bases);
 static enum result install_fields(
 	StructType * struct_class,
 	StructType const * base,
@@ -214,11 +215,11 @@ PyObject * StructMeta_new(
 		NULL
 	);
 
-	/* Already installed means type.__new__ delegated to a more derived metatype,
-	 * which re-entered here and built the class in full -- or a metaclass __new__
-	 * handed back a struct class it did not just make. Installing over either one
-	 * overwrites a field table without releasing it, and the plan that produced
-	 * it came from this same name, bases and namespace anyway. */
+	/* create_class builds as the winning metatype, so the ordinary handoff no
+	 * longer comes back here already installed. What still can is a metaclass
+	 * __new__ that returned a struct class -- possibly one it did not just make,
+	 * whose slot offsets belong to a layout this plan knows nothing about.
+	 * Installing over that is a field table pointed at the wrong memory. */
 	if (
 		struct_class != NULL &&
 		struct_class->struct_field_names == NULL &&
@@ -507,20 +508,27 @@ static StructType * create_class(
 		return NULL;
 	}
 
-	PY_MOVABLE(created, PyType_Type.tp_new(metatype, type_args, NULL));
+	/* type_new hands off to the winning metatype's tp_new when that is not the
+	 * one it was given. Where the winner would only land back in StructMeta_new,
+	 * building as the winner in the first place reaches the same class without
+	 * the round trip -- which re-planned from the transformed namespace and with
+	 * no keywords, so the requested options and the body's defaults were gone by
+	 * the time it returned. */
+	PyTypeObject * const winner = winning_metatype(metatype, bases);
+	PyTypeObject * const builder = winner->tp_new == StructMeta_new ? winner : metatype;
+	PY_MOVABLE(created, PyType_Type.tp_new(builder, type_args, NULL));
 
 	if (created == NULL) {
 		return NULL;
 	}
 
-	/* type_new hands off to the winning metatype's tp_new when that is not the
-	 * one it was given, so a StructMeta subclass overriding __new__ decides what
-	 * comes back here -- and install_fields writes StructType storage into it. */
+	/* A StructMeta subclass overriding __new__ still decides what comes back
+	 * here -- and install_fields writes StructType storage into it. */
 	if (!is_struct_class(created)) {
 		PyErr_Format(
 			PyExc_TypeError,
 			"%.200s.__new__ returned %.200s, which is not a struct class",
-			metatype->tp_name,
+			winner->tp_name,
 			Py_TYPE(created)->tp_name
 		);
 
@@ -528,6 +536,26 @@ static StructType * create_class(
 	}
 
 	return (StructType *) py_move(&created);
+}
+
+/*
+ * type_new's own rule: the most derived of the requested metatype and the
+ * bases' metatypes builds the class. Metatypes that are unrelated to each
+ * other are a conflict rather than a winner, and this returns the requested one
+ * for that case so type_new raises the error it has always raised.
+ */
+static PyTypeObject * winning_metatype(PyTypeObject * const requested, PyObject * const bases) {
+	PyTypeObject * winner = requested;
+
+	for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(bases); ++i) {
+		PyTypeObject * const candidate = Py_TYPE(PyTuple_GET_ITEM(bases, i));
+
+		if (PyType_IsSubtype(candidate, winner)) {
+			winner = candidate;
+		}
+	}
+
+	return winner;
 }
 
 /* The type exists but is not yet a struct; this is what makes it one. */
