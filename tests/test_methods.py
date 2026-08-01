@@ -94,7 +94,8 @@ class TestMethods:
         the body defines one.
 
         `set_field` rather than `self.x = ...` because the struct is frozen by
-        default, and the frozen wall does not open for its own `__init__`.
+        default, and the frozen wall does not open for its own `__init__` --
+        test_custom_init.py pins both halves of that.
         """
 
         class Custom(Struct):
@@ -241,25 +242,16 @@ class TestBindingsSalixOwns:
 
         assert Matched.__match_args__ == ("x",)
 
-    def test_a_body_init_cannot_assign_through_the_frozen_wall(self):
-        """The other half of what makes set_field the recipe: the natural
-        spelling is what a reader reaches for first, and it does not work.
-        """
-
-        class Assigning(Struct):
-            x: int
-
-            def __init__(self, x: int) -> None:
-                self.x = x
-
-        with pytest.raises(TypeError, match="does not support attribute assignment"):
-            Assigning(1)
-
 
 class TestNameCollisions:
     def test_a_method_named_after_a_field_is_dropped(self):
-        """The slot descriptor wins and the method is discarded. Not a salix
-        quirk: dataclass, dataclass(slots=True) and NamedTuple all do this.
+        """The slot descriptor wins and the method is discarded, as it is for
+        `dataclass(slots=True)` (a member_descriptor) and NamedTuple (a
+        _tuplegetter).
+
+        A plain dataclass is the odd one out and the worse of the two: nothing
+        replaces the function, so it is read as the field's *default* and
+        `DC()` constructs an instance whose x is the method.
         """
 
         class Collide(Struct):
