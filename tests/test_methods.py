@@ -7,12 +7,16 @@ that motivate reaching for a struct in the first place -- `to_bytes`,
 `to_string`, a `from_bytes` classmethod -- plus the descriptors that sit
 alongside them, and the dunders that salix would otherwise generate.
 
-Methods are the subject; `__slots__` and `__match_args__` are salix's whatever
-the body says, and `TestBindingsSalixOwns` is where that is pinned.
+Methods are the subject. `__slots__` is salix's whatever the body says, and
+`__match_args__` is unless the class opts out of it; `TestBindingsSalixOwns`
+pins both, including where the body wins.
 """
 
+import dataclasses
 import functools
 import struct as struct_module
+import sys
+from typing import NamedTuple
 
 import pytest
 
@@ -73,14 +77,15 @@ class TestMethods:
 
         frame = Frame.from_bytes(b"\x02\x01\x07\x01")
 
+        assert type(frame) is Frame
         assert (frame.length, frame.kind, frame.flags) == (258, 7, 1)
-        assert isinstance(frame, Frame)
 
     def test_a_round_trip_returns_an_equal_struct(self):
         """Composing pack with unpack holds by the struct module's own inverse
         property, so this pins the classmethod reaching `__eq__` with a real
-        instance and nothing about the wire format -- the two tests above are
-        what would catch `<HBB` changing.
+        instance and nothing about the wire format. The two that pin the format
+        are the ones checking `to_bytes` and `from_bytes` against independent
+        bytes; neither of them is the test directly above.
         """
 
         original = Frame(4096, 3, 2)
@@ -103,7 +108,9 @@ class TestMethods:
         assert not Frame(1, 0).is_empty
 
     def test_a_dunder_the_body_defines_is_kept(self):
-        assert len(Frame(258, 7)) == 258
+        frame = Frame(258, 7)
+
+        assert (len(frame), frame.kind) == (258, 7)
 
     def test_a_body_repr_and_init_displace_the_generated_ones(self):
         """Two different mechanisms reaching the same place. `__repr__` is a
@@ -204,11 +211,9 @@ class TestCaching:
         """A struct's fields are its slots and it has no instance dict, so there
         is nowhere for cached_property to put the value.
 
-        `dataclass(slots=True)` fails with the same message. NamedTuple fails
-        too, but for its own reason below 3.13 -- `Cannot use cached_property
-        instance without calling __set_name__ on it`, because the NamedTuple
-        machinery never makes that call -- and with the missing-dict message
-        from 3.13 on. Only a dataclass carrying a __dict__ succeeds.
+        The siblings are asserted below rather than described here, because
+        every parity claim this file made in prose has turned out to be wrong at
+        least once.
         """
 
         class Cached(Struct):
@@ -220,6 +225,50 @@ class TestCaching:
 
         with pytest.raises(TypeError, match="No '__dict__' attribute"):
             _ = Cached(2).expensive
+
+    def test_a_slotted_dataclass_fails_the_same_way(self):
+        @dataclasses.dataclass(slots=True)
+        class Cached:
+            x: int
+
+            @functools.cached_property
+            def expensive(self) -> int:
+                return self.x * 100
+
+        with pytest.raises(TypeError, match="No '__dict__' attribute"):
+            _ = Cached(2).expensive
+
+    def test_a_namedtuple_fails_too_for_its_own_reason_below_3_13(self):
+        """Below 3.13 the NamedTuple machinery never calls `__set_name__`, so
+        the descriptor complains about that rather than about the missing dict.
+        """
+
+        class Cached(NamedTuple):
+            x: int
+
+            @functools.cached_property
+            def expensive(self) -> int:
+                return self.x * 100
+
+        expected = (
+            "No '__dict__' attribute"
+            if sys.version_info >= (3, 13)
+            else "without calling __set_name__"
+        )
+
+        with pytest.raises(TypeError, match=expected):
+            _ = Cached(2).expensive
+
+    def test_only_a_dataclass_carrying_a_dict_succeeds(self):
+        @dataclasses.dataclass
+        class Cached:
+            x: int
+
+            @functools.cached_property
+            def expensive(self) -> int:
+                return self.x * 100
+
+        assert Cached(2).expensive == 200
 
     def test_functools_cache_on_a_method_still_works(self):
         """It caches on the function rather than the instance, so the absent
@@ -249,8 +298,9 @@ class TestCaching:
 
 
 class TestBindingsSalixOwns:
-    """Not every body binding is the body's to keep. These two are salix's
-    whatever the class writes, and neither collides with a field name.
+    """Not every body binding is the body's to keep, and neither of these
+    collides with a field name. `__slots__` is taken unconditionally;
+    `__match_args__` only while the class wants one.
     """
 
     def test_a_body_slots_is_replaced_by_the_fields(self):
@@ -266,6 +316,19 @@ class TestBindingsSalixOwns:
             __match_args__ = ("nope",)
 
         assert Matched.__match_args__ == ("x",)
+
+    def test_opting_out_of_match_args_leaves_the_body_its_own(self):
+        """`match_args=False` means salix writes none, not that it writes an
+        empty one -- so the body keeps what it wrote, and `__slots__` does not.
+        """
+
+        class Matched(Struct, match_args=False):
+            x: int
+            __match_args__ = ("nope",)
+            __slots__ = ("extra",)
+
+        assert Matched.__match_args__ == ("nope",)
+        assert Matched.__slots__ == ("x",)
 
 
 class TestNameCollisions:
