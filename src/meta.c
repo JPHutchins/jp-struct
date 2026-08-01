@@ -163,7 +163,13 @@ PyObject * StructMeta_new(
 		return NULL;
 	}
 
-	if (!inherits_mixin(bases)) {
+	StructType const * const base = find_struct_base(bases);
+
+	/* A struct base is a mixin subtype already -- Struct is built on the mixin
+	 * and every struct descends from it -- so the scan below is only for the
+	 * classes that have no struct base at all, Struct's own creation among
+	 * them. */
+	if (base == NULL && !inherits_mixin(bases)) {
 		PyErr_SetString(
 			PyExc_TypeError,
 			"a struct class inherits salix.Struct; StructMeta is the metaclass of "
@@ -173,7 +179,6 @@ PyObject * StructMeta_new(
 		return NULL;
 	}
 
-	StructType const * const base = find_struct_base(bases);
 	struct options const inherited = base_options(base);
 	struct options_request const request =
 		options_read(keywords, inherited, base != NULL && base->struct_field_count > 0);
