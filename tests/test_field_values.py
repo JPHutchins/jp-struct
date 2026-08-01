@@ -28,13 +28,23 @@ def test_a_value_survives_a_round_trip_unchanged(value):
     assert Pair(first=value, second=value).first is value
 
 
+# The four the constructor copies per instance, so that `xs: list = []` means an
+# empty list each time rather than one shared between every instance.
+COPIED_PER_INSTANCE = (list, dict, set, bytearray)
+
+
 @pytest.mark.parametrize("value", EVERY, ids=identify)
 def test_a_value_may_be_a_default(value):
     class Local(Struct):
         field: object = value
 
-    assert Local().field is value
+    assert Local().field == value
     assert Local().__struct_defaults__ == (value,)
+
+    if isinstance(value, COPIED_PER_INSTANCE):
+        assert Local().field is not value
+    else:
+        assert Local().field is value
 
 
 @pytest.mark.parametrize("value", EVERY, ids=identify)

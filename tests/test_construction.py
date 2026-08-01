@@ -91,3 +91,81 @@ def test_the_class_is_callable_through_the_slow_path_too():
     arguments = (1, 2)
 
     assert Point(*arguments) == Point.__call__(*arguments)
+
+
+class TestMutableDefaults:
+    """`xs: list = []` reads as an empty list per instance, and that is what it
+    gets. The four builtins that mean "container I will mutate" are copied at
+    construction; anything that cannot be changed out from under another
+    instance is shared, which is cheaper and indistinguishable.
+    """
+
+    def test_a_list_default_is_not_shared(self):
+        class Holder(Struct, frozen=False):
+            xs: list = []  # noqa: RUF012 -- the copy is the feature under test
+
+        first, second = Holder(), Holder()
+        first.xs.append(1)
+
+        assert second.xs == []
+
+    def test_a_frozen_struct_still_shares_its_mutable_field(self):
+        """Frozen stops rebinding, not mutation -- the same as a frozen
+        dataclass, and the reason the copy happens per instance rather than
+        being left to immutability.
+        """
+
+        class Holder(Struct):
+            xs: list = []  # noqa: RUF012 -- the copy is the feature under test
+
+        first, second = Holder(), Holder()
+        first.xs.append(1)
+
+        assert second.xs == []
+
+    @pytest.mark.parametrize("factory", [dict, set, bytearray])
+    def test_the_other_mutable_builtins_are_copied_too(self, factory):
+        Holder = type(Struct)(
+            "Holder", (Struct,), {"__annotations__": {"v": object}, "v": factory()}
+        )
+
+        assert Holder().v is not Holder().v
+
+    def test_an_immutable_default_is_shared(self):
+        class Inner(Struct):
+            a: int
+
+        class Holder(Struct):
+            number: int = 5
+            text: str = "x"
+            pair: tuple = (1, 2)
+            nested: Inner = Inner(1)
+
+        first, second = Holder(), Holder()
+
+        assert first.number is second.number
+        assert first.text is second.text
+        assert first.pair is second.pair
+        assert first.nested is second.nested
+
+    def test_a_supplied_value_is_still_stored_rather_than_copied(self):
+        """Only the default is the class's to hand out repeatedly."""
+
+        class Holder(Struct):
+            xs: list = []  # noqa: RUF012 -- the copy is the feature under test
+
+        supplied = [1]
+
+        assert Holder(supplied).xs is supplied
+
+    def test_an_inherited_default_is_copied_as_well(self):
+        class Base(Struct, frozen=False):
+            xs: list = []  # noqa: RUF012 -- the copy is the feature under test
+
+        class Child(Base):
+            y: int = 0
+
+        first, second = Child(), Child()
+        first.xs.append(1)
+
+        assert second.xs == []

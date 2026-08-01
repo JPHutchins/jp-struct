@@ -38,6 +38,7 @@ static enum result write_slot(
 	PyObject * value
 );
 static enum result run_post_init(StructType const * type, PyObject * self);
+static PyObject * default_for(PyObject * declared);
 
 /*
  * Instances are built straight into slot memory: allocate, then let each of
@@ -189,10 +190,53 @@ static enum result fill_defaults(
 			return RESULT_ERROR;
 		}
 
-		*slot = Py_NewRef(PyTuple_GET_ITEM(type->struct_defaults, i - required_count));
+		PyObject * const value = default_for(
+			PyTuple_GET_ITEM(type->struct_defaults, i - required_count)
+		);
+
+		if (value == NULL) {
+			return RESULT_ERROR;
+		}
+
+		*slot = value;
 	}
 
 	return RESULT_OK;
+}
+
+/*
+ * A mutable default belongs to the instance, not to the class: `xs: list = []`
+ * reads as an empty list per struct, and handing every instance the same one is
+ * a bug people write by accident. The four builtins that spell "container I
+ * will mutate" are copied; everything else is shared, which is what you want
+ * for an int, a string, a tuple, or a frozen struct -- none of them can be
+ * changed out from under another instance.
+ *
+ * dataclasses refuses this shape instead, and needs default_factory to express
+ * it at all. msgspec copies, and so does this: it costs the copy only on the
+ * fields that have one, and it makes the common spelling mean what it looks
+ * like it means.
+ */
+static PyObject * default_for(PyObject * const declared) {
+	PyTypeObject * const kind = Py_TYPE(declared);
+
+	if (kind == &PyList_Type) {
+		return PyList_GetSlice(declared, 0, PyList_GET_SIZE(declared));
+	}
+
+	if (kind == &PyDict_Type) {
+		return PyDict_Copy(declared);
+	}
+
+	if (kind == &PySet_Type) {
+		return PySet_New(declared);
+	}
+
+	if (kind == &PyByteArray_Type) {
+		return PyByteArray_FromObject(declared);
+	}
+
+	return Py_NewRef(declared);
 }
 
 /*
