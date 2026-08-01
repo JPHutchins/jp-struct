@@ -14,6 +14,10 @@ enum annotation_format {
 static PyObject * borrow_annotate(PyObject * namespace);
 static PyObject * evaluate(PyObject * annotate);
 
+#if PY_VERSION_HEX >= 0x030E0000
+static bool names_an_unresolved_symbol(PyObject * error);
+#endif
+
 PyObject * struct_annotations(PyObject * const namespace) {
 	PyObject * const declared = PyDict_GetItemString(namespace, "__annotations__");
 
@@ -55,7 +59,8 @@ static PyObject * borrow_annotate(PyObject * const namespace) {
  *
  * The import is a plain path-based one and could in principle find a user
  * module of that name; a checkout that shadows a stdlib module has larger
- * problems, and the failure is loud rather than silent.
+ * problems, and the NameError it displaces is put back as the raised one with
+ * the import failure behind it, so neither is lost.
  */
 static PyObject * evaluate(PyObject * const annotate) {
 	PY_MOVABLE(resolved, PyObject_CallFunction(annotate, "i", ANNOTATION_FORMAT_VALUE));
@@ -68,23 +73,52 @@ static PyObject * evaluate(PyObject * const annotate) {
 	 * thing a plain function does, and the same thing every version below 3.14
 	 * does. */
 	if (resolved == NULL && PyFunction_Check(annotate) && PyErr_ExceptionMatches(PyExc_NameError)) {
-		PyErr_Clear();
+		PY_MOVABLE(unresolved, PyErr_GetRaisedException());
 
-		PY_OWNED(annotationlib, PyImport_ImportModule("annotationlib"));
+		if (names_an_unresolved_symbol(unresolved)) {
+			/* No `owner`: the class does not exist yet, so annotationlib builds
+			 * every ForwardRef unowned and class-scope resolution is off the
+			 * table. Only the keys are read here, so nothing depends on it. */
+			PY_OWNED(annotationlib, PyImport_ImportModule("annotationlib"));
 
-		if (annotationlib == NULL) {
-			return NULL;
+			if (annotationlib != NULL) {
+				return PyObject_CallMethod(
+					annotationlib,
+					"call_annotate_function",
+					"Oi",
+					annotate,
+					ANNOTATION_FORMAT_FORWARDREF
+				);
+			}
+
+			PyException_SetContext(unresolved, PyErr_GetRaisedException());
 		}
 
-		return PyObject_CallMethod(
-			annotationlib,
-			"call_annotate_function",
-			"Oi",
-			annotate,
-			ANNOTATION_FORMAT_FORWARDREF
-		);
+		PyErr_SetRaisedException(py_move(&unresolved));
+
+		return NULL;
 	}
 #endif
 
 	return py_move(&resolved);
 }
+
+#if PY_VERSION_HEX >= 0x030E0000
+/*
+ * Not resolving a name is the exemption; arbitrary failure is not, and a
+ * NameError the annotation raised for its own reasons is arbitrary failure
+ * wearing the right coat. The interpreter fills `name` in when a lookup is what
+ * failed, and leaves it None for an explicit ``raise NameError(...)``.
+ */
+static bool names_an_unresolved_symbol(PyObject * const error) {
+	PY_OWNED(name, PyObject_GetAttrString(error, "name"));
+
+	if (name == NULL) {
+		PyErr_Clear();
+
+		return false;
+	}
+
+	return !Py_IsNone(name);
+}
+#endif

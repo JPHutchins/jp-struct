@@ -54,9 +54,12 @@ class TestANonFunctionAnnotate:
 
     @pytest.mark.parametrize("wrap", ["plain", "partial", "callable"])
     def test_an_unresolvable_name_reports_itself_whatever_the_callable_is(self, wrap):
-        """A plain function reaches annotationlib and comes back with the
-        NameError; the other two are held back from it and raise the same thing
-        rather than an AttributeError about __globals__.
+        """On 3.14+ a plain function reaches annotationlib and comes back with
+        the NameError, while the other two are held back from it and raise the
+        same thing rather than an AttributeError about __globals__. Below 3.14
+        the escalation is compiled out and all three propagate it directly, so
+        the assertion holds everywhere and only the plain case exercises the
+        guard.
         """
 
         annotate = TestANonFunctionAnnotate.protocol_correct
@@ -86,6 +89,7 @@ class TestANonFunctionAnnotate:
         Built = type(Struct)("Built", (Struct,), {"__annotate__": functools.partial(annotate)})
 
         assert Built.__struct_fields__ == ("z",)
+        assert Built(1).z == 1
 
 
 @pytest.mark.skipif(
@@ -149,3 +153,41 @@ class TestForwardReferences:
 
             class Broken(Struct):
                 x: 1 / 0
+
+    def test_a_raised_NameError_is_arbitrary_failure_too(self):
+        """The exemption is the interpreter's failure to find a name, not the
+        exception type it uses to say so.
+        """
+
+        def boom():
+            raise NameError("boom")
+
+        with pytest.raises(NameError, match="boom"):
+
+            class Broken(Struct):
+                x: boom()
+
+    def test_the_name_that_did_not_resolve_survives_a_failed_escalation(self, monkeypatch):
+        """The escalation needs annotationlib, and the NameError it displaced is
+        the one worth reading if that import is what fails.
+        """
+
+        monkeypatch.setitem(sys.modules, "annotationlib", None)
+
+        with pytest.raises(NameError, match="Missing") as raised:
+
+            class Shadowed(Struct):
+                x: Missing  # noqa: F821
+
+        assert isinstance(raised.value.__context__, ImportError)
+
+    def test_an_unresolved_name_inside_a_larger_expression_still_defers(self):
+        """`.name` is filled in wherever the lookup was, so the exemption does
+        not stop at a bare annotation.
+        """
+
+        class Deferred(Struct):
+            x: Unresolvable + 1  # noqa: F821
+
+        assert Deferred.__struct_fields__ == ("x",)
+        assert Deferred(1).x == 1
