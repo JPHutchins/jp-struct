@@ -10,6 +10,10 @@ class Point(Struct):
     y: int
 
 
+class Mutable(Struct, frozen=False):
+    a: int
+
+
 class Defaulted(Struct):
     a: int
     b: int = 2
@@ -226,19 +230,51 @@ class TestMutableDefaults:
             pytest.param(__import__("array").array("i", [1, 2]), id="array"),
             pytest.param(__import__("collections").deque([1, 2]), id="deque"),
             pytest.param(memoryview(bytearray(b"abc")), id="memoryview"),
+            pytest.param(Mutable(1), id="a_mutable_struct"),
         ],
     )
     def test_a_mutable_container_outside_the_four_is_shared_and_not_refused(self, value):
         """The boundary is the four exact types, not mutability, so these are
         neither copied nor refused. Every one is unhashable, which is the test
-        #51 argues should replace the list.
+        #51 argues should replace the list -- salix's own `frozen=False` struct
+        included, since `eq` without `frozen` sets `__hash__` to None.
+
+        `hash(value)` rather than `isinstance(value, Hashable)`: the ABC asks
+        whether `__hash__` is non-None, and a writable memoryview has one that
+        raises when called. Only the call is the test.
         """
+
+        with pytest.raises((TypeError, ValueError)):
+            hash(value)
 
         class Holder(Struct, frozen=False):
             v: object = value
 
         assert Holder().v is Holder().v
         assert Holder.__struct_defaults__[0] is value
+
+    def test_a_set_default_is_refused_before_its_elements_are_hashed(self):
+        """Copying a set hashes every element, so copying before refusing would
+        run user code at class definition on the way to an error -- and let an
+        element's exception replace the TypeError the refusal promises.
+        """
+
+        hashed = []
+
+        class Counts:
+            def __hash__(self) -> int:
+                hashed.append(1)
+                return 0
+
+        contents = {Counts()}
+        hashed.clear()  # building the set literal hashed it once, before salix
+
+        with pytest.raises(TypeError, match="non-empty set"):
+
+            class Holder(Struct):
+                v: object = contents
+
+        assert hashed == []
 
     def test_a_body_init_does_not_exempt_the_declared_default(self):
         """Its constructor never reads the default, so nothing is shared -- but

@@ -202,12 +202,7 @@ static enum inheritance inherits_field(StructType const * const base, PyObject *
  */
 static enum result reject_unsafe_default(PyObject * const field_name, PyObject * const value) {
 	PyTypeObject * const kind = Py_TYPE(value);
-	Py_ssize_t const filled = (
-		kind == &PyList_Type || kind == &PyDict_Type || kind == &PySet_Type || kind == &PyByteArray_Type ? PyObject_Size(
-			value
-		) :
-		0
-	);
+	Py_ssize_t const filled = struct_copies_default(kind) ? PyObject_Size(value) : 0;
 
 	if (filled <= 0) {
 		return filled < 0 ? RESULT_ERROR : RESULT_OK;
@@ -263,12 +258,22 @@ static PyObject * build_defaults(PyObject * const all_names, PyObject * const de
 		PyObject * const field_name = PyList_GET_ITEM(all_names, i);
 		PyObject * const value = PyDict_GetItem(default_by_name, field_name);
 
-		/* Copy first and check the copy, not the declaration. The two are
-		 * separate reads of an object the module still holds, and on a
-		 * free-threaded build another thread can fill it in between -- so what
-		 * is checked has to be the thing that is kept. Once kept it is the
-		 * class's own and nobody can fill it, which is what makes the emptiness
-		 * permanent rather than momentary. */
+		/* Twice, on purpose. The first read is of an object the module still
+		 * holds, so it decides nothing -- but it is O(1), and it keeps a default
+		 * that is going to be refused from being copied first. That matters for
+		 * a set, whose copy hashes every element, which is user code running at
+		 * class definition on the way to an error.
+		 *
+		 * The second read is the one that counts, because by then nothing else
+		 * has a reference to what is being checked. A thread filling the
+		 * declaration between the two cannot reach the copy, and the copy is
+		 * what the class keeps. */
+		if (reject_unsafe_default(field_name, value) != RESULT_OK) {
+			Py_DECREF(defaults);
+
+			return NULL;
+		}
+
 		PyObject * const stored = struct_default_copy(value);
 
 		if (stored == NULL || reject_unsafe_default(field_name, stored) != RESULT_OK) {

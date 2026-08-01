@@ -236,6 +236,10 @@ static enum result fill_defaults(
 PyObject * struct_default_copy(PyObject * const declared) {
 	PyTypeObject * const kind = Py_TYPE(declared);
 
+	if (!struct_copies_default(kind)) {
+		return Py_NewRef(declared);
+	}
+
 	if (kind == &PyList_Type) {
 		return PyList_GetSlice(declared, 0, PyList_GET_SIZE(declared));
 	}
@@ -248,11 +252,7 @@ PyObject * struct_default_copy(PyObject * const declared) {
 		return PySet_New(declared);
 	}
 
-	if (kind == &PyByteArray_Type) {
-		return PyByteArray_FromObject(declared);
-	}
-
-	return Py_NewRef(declared);
+	return PyByteArray_FromObject(declared);
 }
 
 /*
