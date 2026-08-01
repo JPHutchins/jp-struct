@@ -128,6 +128,12 @@ static PyObject * evaluate(PyObject * const annotate) {
 			 * NameError's __context__ would swallow the interrupt and report a
 			 * name instead. */
 			if (failure != NULL && !PyErr_GivenExceptionMatches(failure, PyExc_Exception)) {
+				/* The exit wins, but the name still says which annotation the
+				 * rescue was for, so it goes behind rather than nowhere. */
+				if (PyException_GetContext(failure) == NULL) {
+					PyException_SetContext(failure, py_move(&unresolved));
+				}
+
 				PyErr_SetRaisedException(py_move(&failure));
 
 				return NULL;
@@ -173,9 +179,16 @@ static bool names_an_unresolved_symbol(PyObject * const error) {
 	PyObject * found = NULL;
 
 	/* A failure to look is not "no name": the caller re-raises the NameError,
-	 * which would clear this. Chained onto it instead, so it survives. */
+	 * which would clear this. Chained onto it instead, so it survives -- and
+	 * only where there is no chain already, the same rule the escalation's own
+	 * failure follows. */
 	if (PyObject_GetOptionalAttrString(error, "name", &found) < 0) {
-		PyException_SetContext(error, PyErr_GetRaisedException());
+		PY_MOVABLE(failure, PyErr_GetRaisedException());
+		PY_OWNED(chained, PyException_GetContext(error));
+
+		if (chained == NULL) {
+			PyException_SetContext(error, py_move(&failure));
+		}
 
 		return false;
 	}
