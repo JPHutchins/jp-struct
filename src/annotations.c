@@ -61,7 +61,9 @@ static PyObject * borrow_annotate(PyObject * const namespace) {
  * FORWARDREF is the fallback: it leaves an unresolved bare forward reference as
  * a ForwardRef instead of raising, which is all we need since only the field
  * *names* and *order* are read here. It has to come from annotationlib, since a
- * generated __annotate__ answers NotImplementedError to every format but VALUE,
+ * generated __annotate__ answers NotImplementedError to VALUE_WITH_FAKE_GLOBALS
+ * only after annotationlib has rebuilt it -- which is the rescue -- and to
+ * FORWARDREF and STRING always,
  * and annotationlib is stdlib only from 3.14 -- below that there is no PEP 649
  * either, so an __annotate__ in the namespace is one the class body wrote and
  * VALUE is the whole story.
@@ -115,7 +117,14 @@ static PyObject * evaluate(PyObject * const annotate) {
 			/* Either half can fail, and both bury the same thing. A second bad
 			 * annotation makes the re-evaluation raise for its own reasons, and
 			 * that error says nothing about the name this started with. */
-			PyException_SetContext(unresolved, PyErr_GetRaisedException());
+			PY_MOVABLE(failure, PyErr_GetRaisedException());
+
+			/* Only where there is nothing to lose. A NameError raised while
+			 * another exception was being handled arrives with a chain, and
+			 * that chain says more about the class than this failure does. */
+			if (PyException_GetContext(unresolved) == NULL) {
+				PyException_SetContext(unresolved, py_move(&failure));
+			}
 		}
 
 		PyErr_SetRaisedException(py_move(&unresolved));
@@ -132,7 +141,8 @@ static PyObject * evaluate(PyObject * const annotate) {
  * Not resolving a name is the exemption; arbitrary failure is not, and a
  * NameError the annotation raised for its own reasons is arbitrary failure
  * wearing the right coat. The interpreter fills `name` in when a lookup is what
- * failed, and `raise NameError("...")` leaves it None.
+ * failed, and `raise NameError("...")` leaves it None -- as does anything that
+ * is not a non-empty str, which the interpreter never produces.
  *
  * Which is what this can tell apart, and all of it. `raise NameError(name=...)`
  * sets the attribute and reads as a forward reference; so does anything at all,
@@ -145,13 +155,13 @@ static bool names_an_unresolved_symbol(PyObject * const error) {
 	PyObject * found = NULL;
 
 	if (PyObject_GetOptionalAttrString(error, "name", &found) < 0) {
-		PyErr_Clear();
-
 		return false;
 	}
 
 	PY_OWNED(name, found);
 
-	return name != NULL && !Py_IsNone(name);
+	/* The interpreter sets a real symbol, so a non-str or an empty one is
+	 * something the raising code put there. */
+	return name != NULL && PyUnicode_Check(name) && PyUnicode_GET_LENGTH(name) > 0;
 }
 #endif

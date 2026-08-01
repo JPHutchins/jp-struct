@@ -97,8 +97,10 @@ class TestANonFunctionAnnotate:
         reason="the escalation this drives is compiled out before 3.14",
     )
     def test_a_plain_function_can_reach_the_escalation_success_branch(self):
-        """The middle case, and the only one that returns through
-        `escalated != NULL` without a compiler-generated annotate.
+        """A hand-written annotate returning through `escalated != NULL`.
+        `test_the_escalation_answers_with_what_forwardref_returned` is the
+        other; this one is about reaching the branch, that one about what comes
+        back from it.
 
         annotationlib rebuilds the function against fake globals and calls the
         copy with VALUE_WITH_FAKE_GLOBALS, where names resolve to stringifiers.
@@ -141,6 +143,19 @@ class TestANonFunctionAnnotate:
         Built = type(Struct)("Built", (Struct,), {"__annotate__": inconsistent})
 
         assert Built.__struct_fields__ == ("only_this",)
+
+    def test_an_empty_name_is_not_a_forward_reference(self):
+        """`.name` set but empty names no symbol, so it is not the interpreter
+        saying a lookup failed. The boundary of the discriminator, pinned.
+        """
+
+        def forged():
+            raise NameError(name="")
+
+        with pytest.raises(NameError):
+
+            class Refused(Struct):
+                v: forged()
 
     def test_an_annotate_that_refuses_VALUE_is_refused_back(self):
         """PEP 649 makes VALUE the one format an __annotate__ must implement,
