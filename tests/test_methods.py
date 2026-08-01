@@ -1,10 +1,11 @@
 """Methods on a struct, in the shapes people actually write them.
 
-A struct's body is an ordinary class body: the generated `__init__`, `__eq__`,
-`__hash__` and `__repr__` do not displace anything it defines. These are the
-codec-shaped methods that motivate reaching for a struct in the first place --
-`to_bytes`, `to_string`, a `from_bytes` classmethod -- plus the descriptors that
-sit alongside them.
+A struct's body is an ordinary class body, and what it defines is kept -- with
+one exception, which is a name that collides with a field, where the slot
+descriptor wins. These are the codec-shaped methods that motivate reaching for a
+struct in the first place -- `to_bytes`, `to_string`, a `from_bytes` classmethod
+-- plus the descriptors that sit alongside them, and the dunders that salix
+would otherwise generate.
 """
 
 import functools
@@ -82,6 +83,27 @@ class TestMethods:
     def test_a_dunder_the_body_defines_is_kept(self):
         assert len(Frame(258, 7)) == 258
 
+    def test_a_body_repr_and_init_displace_the_generated_ones(self):
+        """The claim in this file's docstring, made testable: the two dunders
+        salix would have written are the body's when the body writes them.
+        """
+
+        class Custom(Struct):
+            x: int
+
+            def __repr__(self) -> str:
+                return "custom repr"
+
+            def __init__(self, x: int) -> None:
+                set_field(self, "x", x * 10)
+
+        instance = Custom(1)
+
+        assert repr(instance) == "custom repr"
+        assert instance.x == 10
+        assert Custom(1) == Custom(1)
+        assert hash(Custom(1)) == hash((10,))
+
     def test_the_generated_dunders_survive_alongside_them(self):
         frame = Frame(258, 7, 1)
 
@@ -125,9 +147,13 @@ class TestInheritedMethods:
 class TestCaching:
     def test_functools_cached_property_is_not_supported(self):
         """A struct's fields are its slots and it has no instance dict, so there
-        is nowhere for cached_property to put the value. The same is true of
-        `dataclass(slots=True)` and NamedTuple; only a dataclass that carries a
-        __dict__ can do it.
+        is nowhere for cached_property to put the value.
+
+        `dataclass(slots=True)` fails with the same message. NamedTuple fails
+        too, but for its own reason below 3.13 -- `Cannot use cached_property
+        instance without calling __set_name__ on it`, because the NamedTuple
+        machinery never makes that call -- and with the missing-dict message
+        from 3.13 on. Only a dataclass carrying a __dict__ succeeds.
         """
 
         class Cached(Struct):
@@ -141,8 +167,13 @@ class TestCaching:
             _ = Cached(2).expensive
 
     def test_a_field_is_the_place_to_cache_instead(self):
-        """What a struct can do that a slotted dataclass cannot: the cache is a
-        declared field, and __post_init__ fills it through the frozen wall.
+        """The cache is a declared field, and __post_init__ fills it through the
+        frozen wall.
+
+        A slotted dataclass can do this too -- directly when it is mutable, and
+        through `object.__setattr__` when it is frozen. What set_field buys is
+        that it is the supported path rather than an escape hatch around the
+        class's own rules.
         """
 
         calls = []
