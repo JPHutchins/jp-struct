@@ -375,3 +375,24 @@ def test_a_pre_existing_context_is_left_alone(monkeypatch):
                 x: Missing  # noqa: F821
 
     assert isinstance(raised.value.__context__, ValueError)
+
+
+@pytest.mark.skipif(sys.version_info < (3, 14), reason="no escalation before 3.14")
+def test_an_interrupt_during_the_rescue_is_not_demoted_to_context():
+    """A rescue failure becomes the NameError's `__context__`; an exit is not a
+    failure to diagnose. Swallowing KeyboardInterrupt to report a name would be
+    the worst of both.
+    """
+
+    class Exits:
+        def __getattr__(self, name: str) -> object:
+            raise KeyboardInterrupt
+
+    def annotate(format):
+        if format == 1:
+            raise NameError(name="Missing")
+
+        raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        type(Struct)("Interrupted", (Struct,), {"__annotate__": annotate})

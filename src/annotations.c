@@ -61,10 +61,12 @@ static PyObject * borrow_annotate(PyObject * const namespace) {
  * FORWARDREF is the fallback: it leaves an unresolved bare forward reference as
  * a ForwardRef instead of raising, which is all we need since only the field
  * *names* and *order* are read here. It has to come from annotationlib, since a
- * generated __annotate__ answers only VALUE directly and NotImplementedError to
- * every other format, which is what annotationlib's rebuild is for: it hands the
- * rebuilt copy VALUE_WITH_FAKE_GLOBALS and lets the same VALUE branch run
- * against stringifiers,
+ * generated __annotate__ evaluates for VALUE and VALUE_WITH_FAKE_GLOBALS -- one
+ * branch, and which globals it sees is the caller's business -- and raises
+ * NotImplementedError for FORWARDREF and STRING. Measured, having been written
+ * from memory three times and been wrong three times. That is what the rebuild
+ * is for: annotationlib gives the copy fake globals and calls it with format 2,
+ * so the evaluating branch runs against stringifiers,
  * and annotationlib is stdlib only from 3.14 -- below that there is no PEP 649
  * either, so an __annotate__ in the namespace is one the class body wrote and
  * VALUE is the whole story.
