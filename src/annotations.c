@@ -61,9 +61,10 @@ static PyObject * borrow_annotate(PyObject * const namespace) {
  * FORWARDREF is the fallback: it leaves an unresolved bare forward reference as
  * a ForwardRef instead of raising, which is all we need since only the field
  * *names* and *order* are read here. It has to come from annotationlib, since a
- * generated __annotate__ answers NotImplementedError to VALUE_WITH_FAKE_GLOBALS
- * only after annotationlib has rebuilt it -- which is the rescue -- and to
- * FORWARDREF and STRING always,
+ * generated __annotate__ answers only VALUE directly and NotImplementedError to
+ * every other format, which is what annotationlib's rebuild is for: it hands the
+ * rebuilt copy VALUE_WITH_FAKE_GLOBALS and lets the same VALUE branch run
+ * against stringifiers,
  * and annotationlib is stdlib only from 3.14 -- below that there is no PEP 649
  * either, so an __annotate__ in the namespace is one the class body wrote and
  * VALUE is the whole story.
@@ -71,8 +72,9 @@ static PyObject * borrow_annotate(PyObject * const namespace) {
  * The import is a plain path-based one and could in principle find a user
  * module of that name; a checkout that shadows a stdlib module has larger
  * problems. Whichever half of the escalation fails, the NameError it displaced
- * is put back as the raised one with that failure behind it as __context__, so
- * the name that did not resolve is never the thing that gets lost.
+ * is put back as the raised one -- with that failure behind it as __context__
+ * where there was no chain already, and untouched where there was, since the
+ * chain it arrived with says more than the rescue's own failure does.
  */
 static PyObject * evaluate(PyObject * const annotate) {
 	PY_OWNED(format, PyLong_FromLong(ANNOTATION_FORMAT_VALUE));
@@ -119,10 +121,23 @@ static PyObject * evaluate(PyObject * const annotate) {
 			 * that error says nothing about the name this started with. */
 			PY_MOVABLE(failure, PyErr_GetRaisedException());
 
+			/* An exit is not a diagnostic. Demoting KeyboardInterrupt to the
+			 * NameError's __context__ would swallow the interrupt and report a
+			 * name instead. */
+			if (failure != NULL && !PyErr_GivenExceptionMatches(failure, PyExc_Exception)) {
+				PyErr_SetRaisedException(py_move(&failure));
+
+				return NULL;
+			}
+
 			/* Only where there is nothing to lose. A NameError raised while
 			 * another exception was being handled arrives with a chain, and
-			 * that chain says more about the class than this failure does. */
-			if (PyException_GetContext(unresolved) == NULL) {
+			 * that chain says more about the class than this failure does.
+			 * GetContext hands back a reference, so it is held rather than
+			 * tested in place. */
+			PY_OWNED(chained, PyException_GetContext(unresolved));
+
+			if (chained == NULL) {
 				PyException_SetContext(unresolved, py_move(&failure));
 			}
 		}
@@ -154,7 +169,11 @@ static PyObject * evaluate(PyObject * const annotate) {
 static bool names_an_unresolved_symbol(PyObject * const error) {
 	PyObject * found = NULL;
 
+	/* A failure to look is not "no name": the caller re-raises the NameError,
+	 * which would clear this. Chained onto it instead, so it survives. */
 	if (PyObject_GetOptionalAttrString(error, "name", &found) < 0) {
+		PyException_SetContext(error, PyErr_GetRaisedException());
+
 		return false;
 	}
 

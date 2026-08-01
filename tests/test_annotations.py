@@ -355,3 +355,23 @@ class TestForwardReferences:
 
         assert Deferred.__struct_fields__ == ("x",)
         assert Deferred(1).x == 1
+
+
+@pytest.mark.skipif(sys.version_info < (3, 14), reason="no escalation before 3.14")
+def test_a_pre_existing_context_is_left_alone(monkeypatch):
+    """The rescue's own failure is attached only where the NameError arrived
+    without a chain. Held rather than tested in place, because
+    PyException_GetContext hands back a reference.
+    """
+
+    monkeypatch.setitem(sys.modules, "annotationlib", None)
+
+    try:
+        raise ValueError("earlier")
+    except ValueError:
+        with pytest.raises(NameError, match="Missing") as raised:
+
+            class Chained(Struct):
+                x: Missing  # noqa: F821
+
+    assert isinstance(raised.value.__context__, ValueError)
