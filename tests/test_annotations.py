@@ -144,6 +144,10 @@ class TestANonFunctionAnnotate:
 
         assert Built.__struct_fields__ == ("only_this",)
 
+    @pytest.mark.skipif(
+        sys.version_info < (3, 14),
+        reason="the discriminator this pins is compiled out before 3.14",
+    )
     def test_an_empty_name_is_not_a_forward_reference(self):
         """`.name` set but empty names no symbol, so it is not the interpreter
         saying a lookup failed. The boundary of the discriminator, pinned.
@@ -383,10 +387,6 @@ def test_an_interrupt_during_the_rescue_is_not_demoted_to_context():
     failure to diagnose. Swallowing KeyboardInterrupt to report a name would be
     the worst of both.
     """
-
-    class Exits:
-        def __getattr__(self, name: str) -> object:
-            raise KeyboardInterrupt
 
     def annotate(format):
         if format == 1:
