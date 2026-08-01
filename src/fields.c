@@ -27,6 +27,7 @@ static enum result append_declared(
 	PyObject * default_by_name
 );
 static PyObject * build_defaults(PyObject * all_names, PyObject * default_by_name);
+static enum result reject_unsafe_default(PyObject * field_name, PyObject * value);
 static PyObject * checked_annotations(PyObject * namespace);
 static enum inheritance inherits_field(StructType const * base, PyObject * field_name);
 
@@ -187,6 +188,41 @@ static enum inheritance inherits_field(StructType const * const base, PyObject *
 	return INHERITANCE_NEW;
 }
 
+/*
+ * An empty mutable container is copied per instance, so it means what it looks
+ * like it means. A non-empty one cannot be: copying it is necessarily shallow,
+ * and `xs: list = [[1]]` would hand every instance its own outer list around
+ * the *same* inner one -- an aliasing bug one level down from the one being
+ * fixed. Refused instead, which is what msgspec does and for the same reason.
+ *
+ * Only the exact builtins, because the copy has to preserve the type and
+ * PyDict_Copy of a defaultdict is a dict. A subclass is shared, as it is
+ * there.
+ */
+static enum result reject_unsafe_default(PyObject * const field_name, PyObject * const value) {
+	PyTypeObject * const kind = Py_TYPE(value);
+	Py_ssize_t const filled = (
+		kind == &PyList_Type || kind == &PyDict_Type || kind == &PySet_Type || kind == &PyByteArray_Type ? PyObject_Size(
+			value
+		) :
+		0
+	);
+
+	if (filled <= 0) {
+		return filled < 0 ? RESULT_ERROR : RESULT_OK;
+	}
+
+	PyErr_Format(
+		PyExc_TypeError,
+		"field '%U' defaults to a non-empty %.100s, which every instance would "
+		"share the contents of; build it in __post_init__ with set_field",
+		field_name,
+		kind->tp_name
+	);
+
+	return RESULT_ERROR;
+}
+
 /* Build the defaults tuple as the trailing run of defaulted fields, and
  * enforce that no required field follows a defaulted one (same rule as
  * Python function signatures). */
@@ -222,7 +258,14 @@ static PyObject * build_defaults(PyObject * const all_names, PyObject * const de
 	}
 
 	for (Py_ssize_t i = first_default; i < field_count; ++i) {
-		PyObject * const value = PyDict_GetItem(default_by_name, PyList_GET_ITEM(all_names, i));
+		PyObject * const field_name = PyList_GET_ITEM(all_names, i);
+		PyObject * const value = PyDict_GetItem(default_by_name, field_name);
+
+		if (reject_unsafe_default(field_name, value) != RESULT_OK) {
+			Py_DECREF(defaults);
+
+			return NULL;
+		}
 
 		PyTuple_SET_ITEM(defaults, i - first_default, Py_NewRef(value));
 	}

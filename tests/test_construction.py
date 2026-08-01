@@ -109,10 +109,10 @@ class TestMutableDefaults:
 
         assert second.xs == []
 
-    def test_a_frozen_struct_still_shares_its_mutable_field(self):
+    def test_frozen_does_not_make_the_copy_unnecessary(self):
         """Frozen stops rebinding, not mutation -- the same as a frozen
-        dataclass, and the reason the copy happens per instance rather than
-        being left to immutability.
+        dataclass -- so the default has to be copied even here. Immutability of
+        the struct is not immutability of what its field points at.
         """
 
         class Holder(Struct):
@@ -125,9 +125,8 @@ class TestMutableDefaults:
 
     @pytest.mark.parametrize("factory", [dict, set, bytearray])
     def test_the_other_mutable_builtins_are_copied_too(self, factory):
-        Holder = type(Struct)(
-            "Holder", (Struct,), {"__annotations__": {"v": object}, "v": factory()}
-        )
+        class Holder(Struct):
+            v: object = factory()
 
         assert Holder().v is not Holder().v
 
@@ -157,6 +156,35 @@ class TestMutableDefaults:
         supplied = [1]
 
         assert Holder(supplied).xs is supplied
+
+    def test_a_non_empty_container_is_refused_rather_than_shallow_copied(self):
+        """Copying it could only be shallow, so every instance would get its own
+        outer list around the same inner one -- the same bug one level down.
+        """
+
+        with pytest.raises(TypeError, match="non-empty list"):
+
+            class Nested(Struct):
+                xs: list = [[1]]  # noqa: RUF012 -- the refusal is the assertion
+
+    @pytest.mark.parametrize("value", [{"k": 1}, {1, 2}, bytearray(b"x")])
+    def test_every_non_empty_builtin_is_refused(self, value):
+        with pytest.raises(TypeError, match="non-empty"):
+
+            class Holder(Struct):
+                v: object = value
+
+    def test_a_subclass_of_a_mutable_builtin_is_shared_not_copied(self):
+        """The copy has to preserve the type and PyDict_Copy of a defaultdict is
+        a dict, so subclasses are left alone -- as msgspec leaves them.
+        """
+
+        from collections import defaultdict
+
+        class Holder(Struct):
+            d: object = defaultdict(list)
+
+        assert Holder().d is Holder().d
 
     def test_an_inherited_default_is_copied_as_well(self):
         class Base(Struct, frozen=False):

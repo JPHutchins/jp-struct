@@ -28,20 +28,30 @@ def test_a_value_survives_a_round_trip_unchanged(value):
     assert Pair(first=value, second=value).first is value
 
 
-# The four the constructor copies per instance, so that `xs: list = []` means an
-# empty list each time rather than one shared between every instance.
-COPIED_PER_INSTANCE = (list, dict, set, bytearray)
+# Exactly these four, not subclasses of them: the copy has to preserve the type,
+# and a PyDict_Copy of a defaultdict is a dict. Empty ones are copied per
+# instance; a non-empty one is refused, because copying it could only be shallow
+# and its contents would still be shared. See tests/test_construction.py.
+COPIED_WHEN_EMPTY = (list, dict, set, bytearray)
 
 
 @pytest.mark.parametrize("value", EVERY, ids=identify)
 def test_a_value_may_be_a_default(value):
+    if type(value) in COPIED_WHEN_EMPTY and len(value) > 0:
+        with pytest.raises(TypeError, match="non-empty"):
+
+            class Refused(Struct):
+                field: object = value
+
+        return
+
     class Local(Struct):
         field: object = value
 
     assert Local().field == value
     assert Local().__struct_defaults__ == (value,)
 
-    if isinstance(value, COPIED_PER_INSTANCE):
+    if type(value) in COPIED_WHEN_EMPTY:
         assert Local().field is not value
     else:
         assert Local().field is value
