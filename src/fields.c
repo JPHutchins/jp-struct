@@ -42,7 +42,7 @@ static struct special_form special_form_of(
 	PyObject * init_var
 );
 static struct special_form named_special_form(PyObject * text);
-static bool names_form(char const * source, char const * form);
+static bool names_form(char const * source, Py_ssize_t length, char const * form);
 static PyObject * module_attribute(char const * module_name, char const * attribute);
 
 /* The plan only takes references once every step has succeeded; the working
@@ -143,6 +143,12 @@ static enum result append_declared(
 	PyObject * field_name;
 	PyObject * annotation;
 	Py_ssize_t position = 0;
+
+	/* A class with no annotations of its own declares no fields and so can name
+	 * no forms; the two probes below are the whole cost of asking. */
+	if (PyDict_GET_SIZE(annotations) == 0) {
+		return RESULT_OK;
+	}
 
 	/* Once per class, not once per field. Absent means the module was never
 	 * imported, so nothing in this body can be naming what it holds -- but
@@ -251,6 +257,17 @@ enum : int {
 	SPECIAL_FORM_HOPS = 4,
 };
 
+/* Both paths answer the same question and owe the user the same sentence, so
+ * the answers live here rather than once per path. */
+static struct special_form const CLASS_VAR_FORM = {
+	.name = "ClassVar",
+	.instead = "write it below the fields, without an annotation",
+};
+static struct special_form const INIT_VAR_FORM = {
+	.name = "InitVar",
+	.instead = "take the value in a custom __init__ and write the fields with set_field",
+};
+
 static struct special_form special_form_of(
 	PyObject * const annotation,
 	PyObject * const class_var,
@@ -266,20 +283,14 @@ static struct special_form special_form_of(
 
 	for (int hop = 0; hop < SPECIAL_FORM_HOPS; ++hop) {
 		if (class_var != NULL && current == class_var) {
-			return (struct special_form){
-				.name = "ClassVar",
-				.instead = "write it below the fields, without an annotation",
-			};
+			return CLASS_VAR_FORM;
 		}
 
 		if (
 			init_var != NULL &&
 			(current == init_var || (PyObject *) Py_TYPE(current) == init_var)
 		) {
-			return (struct special_form){
-				.name = "InitVar",
-				.instead = "take the value in a custom __init__ and write the fields with set_field",
-			};
+			return INIT_VAR_FORM;
 		}
 
 		/* A plain class is the common annotation and has no __origin__; asking
@@ -313,7 +324,8 @@ static struct special_form special_form_of(
  * does not.
  */
 static struct special_form named_special_form(PyObject * const text) {
-	char const * const source = PyUnicode_AsUTF8(text);
+	Py_ssize_t length = 0;
+	char const * const source = PyUnicode_AsUTF8AndSize(text, &length);
 
 	if (source == NULL) {
 		PyErr_Clear();
@@ -321,18 +333,12 @@ static struct special_form named_special_form(PyObject * const text) {
 		return (struct special_form){0};
 	}
 
-	if (names_form(source, "ClassVar")) {
-		return (struct special_form){
-			.name = "ClassVar",
-			.instead = "write it below the fields, without an annotation",
-		};
+	if (names_form(source, length, "ClassVar")) {
+		return CLASS_VAR_FORM;
 	}
 
-	if (names_form(source, "InitVar")) {
-		return (struct special_form){
-			.name = "InitVar",
-			.instead = "take the value in a custom __init__ and write the fields with set_field",
-		};
+	if (names_form(source, length, "InitVar")) {
+		return INIT_VAR_FORM;
 	}
 
 	return (struct special_form){0};
@@ -348,33 +354,53 @@ static struct special_form named_special_form(PyObject * const text) {
  * `ClassVar ` and `ClassVar [int]`, both legal and both stored verbatim under
  * future annotations, walked past an earlier version of this.
  *
+ * A byte at or above 0x80 counts as an identifier character. PEP 3131 lets an
+ * identifier hold any Unicode letter, and this reads UTF-8, so the lead byte of
+ * `é` is the middle of a name rather than the end of one -- otherwise
+ * `théClassVar` reads as the form standing on its own.
+ *
  * A heuristic in both directions, and the only thing available once the
  * annotation is source text. It misses a renamed import -- `ClassVar as CV`
  * gives `CV[int]` -- and it refuses a user's own type that happens to be called
  * ClassVar, and `Annotated[int, ClassVar]` where the form is metadata rather
- * than the type. #57 keeps the list. The object path is exact, and it is what
+ * than the type -- including when it is quoted, since a quote is a boundary.
+ * That last one is deliberate: `x: 'ClassVar[int]'` is a nested forward
+ * reference and has to be refused, and nothing short of parsing tells the two
+ * apart. #57 keeps the list. The object path is exact, and it is what
  * runs unless the module asked for `from __future__ import annotations`.
  */
-static bool identifier_character(char const character) {
+static bool identifier_character(unsigned char const byte) {
 	return (
-		(character >= 'a' && character <= 'z') ||
-		(character >= 'A' && character <= 'Z') ||
-		(character >= '0' && character <= '9') ||
-		character == '_'
+		(byte >= 'a' && byte <= 'z') ||
+		(byte >= 'A' && byte <= 'Z') ||
+		(byte >= '0' && byte <= '9') ||
+		byte == '_' ||
+		byte >= 0x80
 	);
 }
 
-static bool names_form(char const * const source, char const * const form) {
-	size_t const length = strlen(form);
+static bool names_form(
+	char const * const source,
+	Py_ssize_t const source_length,
+	char const * const form
+) {
+	Py_ssize_t const form_length = (Py_ssize_t) strlen(form);
 
-	for (
-		char const * found = strstr(source, form);
-		found != NULL;
-		found = strstr(found + 1, form)
-	) {
-		bool const opens = found == source || !identifier_character(found[-1]);
+	/* Bounded by the string's own length rather than its first NUL. A str is
+	 * allowed to contain one, and strstr would stop there -- leaving whatever
+	 * follows unscanned and the guard silently off. */
+	for (Py_ssize_t at = 0; at + form_length <= source_length; ++at) {
+		if (memcmp(source + at, form, (size_t) form_length) != 0) {
+			continue;
+		}
 
-		if (opens && !identifier_character(found[length])) {
+		bool const opens = at == 0 || !identifier_character(source[at - 1]);
+		bool const closes = (
+			at + form_length == source_length ||
+			!identifier_character(source[at + form_length])
+		);
+
+		if (opens && closes) {
 			return true;
 		}
 	}

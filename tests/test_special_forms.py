@@ -115,6 +115,8 @@ def test_an_annotated_init_var_does_not_hide_the_form_either():
         "Annotated[ ClassVar[int], 'meta' ]",
         "Annotated[ ClassVar ]",
         "Optional[ClassVar[int]]",
+        "x\x00ClassVar[int]",
+        "'ClassVar[int]'",
     ],
 )
 def test_the_source_text_form_is_refused_too(text):
@@ -124,6 +126,10 @@ def test_the_source_text_form_is_refused_too(text):
     The spacings are legal Python and stored verbatim, and an earlier boundary
     rule that enumerated openers and closers separately let every one of them
     through -- accepting a space before the form and not after it.
+
+    A str may hold a NUL, and scanning with `strstr` stopped at it, leaving the
+    rest unread and the guard silently off. The quoted one is a nested forward
+    reference and has to be refused for the same reason the bare spelling is.
     """
 
     with pytest.raises(TypeError, match="salix does not support"):
@@ -141,11 +147,18 @@ def test_the_source_text_form_is_refused_too(text):
         "list[int]",
         "dict[str, int]",
         'Annotated[int, "x"]',
+        "théClassVar",
+        "ClassVaré",
+        "ÄClassVar",
     ],
 )
 def test_a_name_that_merely_contains_the_form_is_a_field(text):
     """The boundary is an identifier character on either side, so widening what
     counts as a separator must not widen what counts as the form.
+
+    The last three are legal identifiers under PEP 3131. Read as UTF-8, the lead
+    byte of a letter like `é` is not ASCII alphanumeric, so an ASCII-only
+    boundary test saw the form standing on its own inside one name.
     """
 
     Ordinary = type(Struct)("Ordinary", (Struct,), {"__annotations__": {"v": text}})
