@@ -1,6 +1,7 @@
 """Argument binding: what reaches a slot, and what is rejected."""
 
 import pytest
+from values import COPIED_WHEN_EMPTY
 
 from salix import Struct
 
@@ -129,11 +130,15 @@ class TestMutableDefaults:
 
         assert second.xs == []
 
-    @pytest.mark.parametrize("factory", [dict, set, bytearray], ids=["dict", "set", "bytearray"])
+    @pytest.mark.parametrize(
+        "factory",
+        [kind for kind in COPIED_WHEN_EMPTY if kind is not list],
+        ids=lambda factory: factory.__name__,
+    )
     def test_the_other_mutable_builtins_are_copied_too(self, factory):
         """`list` has its own test above; these are the rest of the four that
-        `struct_copies_default` names. test_field_values.py's COPIED_WHEN_EMPTY
-        is the list both files derive from.
+        `struct_copies_default` names, taken from that list rather than named
+        again -- adding a type to values.py brings a case here with it.
         """
 
         class Holder(Struct):
@@ -142,31 +147,32 @@ class TestMutableDefaults:
         assert Holder().v is not Holder().v
 
     def test_an_immutable_default_is_shared(self):
-        """The int and the str are built at runtime rather than written as
-        literals: a small int and an interned literal are shared by CPython
-        whatever salix does, so asserting identity on those proves nothing.
+        """The str is built at runtime rather than written as a literal, because
+        an interned literal is shared by CPython whatever salix does. Not
+        `"not interned " * 2` either: the peephole optimiser folds that to one,
+        which is the trap this docstring named and the code then fell into.
+        `str.join` survives compilation.
 
-        Neither `"not interned " * 2` nor `10**20` is enough -- the peephole
-        optimiser folds both, which is the trap this docstring named and the
-        code then fell into twice. `str.join` and `+ 0` survive compilation;
-        `int(n)` would not, since it returns the argument for an int.
+        No int is here at all, after three attempts to find one that would say
+        something. `10**20` folds; so does `10**20 + 0`, to the same constant;
+        and `int(n)` and `copy.copy(n)` both hand an int back unchanged. Both
+        slots therefore hold one object whether salix shares the default or
+        copies everything, so an int can only ever assert that CPython
+        deduplicates ints.
         """
 
         class Inner(Struct):
             a: int
 
-        uncached_number = 10**20 + 0  # the add is what survives constant folding
         uncached_text = "".join(["not ", "interned"])  # noqa: FLY002 -- see above
 
         class Holder(Struct):
-            number: int = uncached_number
             text: str = uncached_text
             pair: tuple = (1, 2)
             nested: Inner = Inner(1)
 
         first, second = Holder(), Holder()
 
-        assert first.number is second.number
         assert first.text is second.text
         assert first.pair is second.pair
         assert first.nested is second.nested

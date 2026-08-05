@@ -199,6 +199,13 @@ static enum inheritance inherits_field(StructType const * const base, PyObject *
  * Only the exact builtins, because the copy has to preserve the type and
  * PyDict_Copy of a defaultdict is a dict. A subclass is shared, as it is
  * there.
+ *
+ * It over-fires deliberately on a class whose body writes its own __init__.
+ * That class displaces the generated constructor, so its declared default is
+ * never handed to an instance and the message's "every instance would share"
+ * is about nothing -- and the same is true of every subclass below it. #56 is
+ * where the whole question of a dead default belongs, and refusing the same
+ * shape everywhere is the answer until it is settled.
  */
 static enum result reject_unsafe_default(PyObject * const field_name, PyObject * const value) {
 	PyTypeObject * const kind = Py_TYPE(value);

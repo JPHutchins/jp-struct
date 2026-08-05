@@ -6,7 +6,15 @@ those three are exactly where an assumption about the type would bite.
 """
 
 import pytest
-from values import EVERY, HASHABLE, UNHASHABLE, Inner, Outer, identify
+from values import (
+    COPIED_WHEN_EMPTY,
+    EVERY,
+    HASHABLE,
+    UNHASHABLE,
+    Inner,
+    Outer,
+    identify,
+)
 
 from salix import Struct
 
@@ -26,13 +34,6 @@ def test_a_value_survives_a_round_trip_unchanged(value):
     assert Pair(value, None).first is value
     assert Pair(None, value).second is value
     assert Pair(first=value, second=value).first is value
-
-
-# Exactly these four, not subclasses of them: the copy has to preserve the type,
-# and a PyDict_Copy of a defaultdict is a dict. Empty ones are copied per
-# instance; a non-empty one is refused, because copying it could only be shallow
-# and its contents would still be shared. See tests/test_construction.py.
-COPIED_WHEN_EMPTY = (list, dict, set, bytearray)
 
 
 @pytest.mark.parametrize("value", EVERY, ids=identify)

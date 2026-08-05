@@ -14,6 +14,14 @@ import typing
 
 from salix import Struct
 
+# Exactly these four, not subclasses of them: the copy has to preserve the type,
+# and a PyDict_Copy of a defaultdict is a dict. Empty ones are copied per
+# instance; a non-empty one is refused, because copying it could only be shallow
+# and its contents would still be shared. `struct_copies_default` in
+# src/construct.h is what this mirrors, and it is the only list of the four that
+# the suite keeps.
+COPIED_WHEN_EMPTY = (list, dict, set, bytearray)
+
 
 class Colour(enum.Enum):
     RED = 1
