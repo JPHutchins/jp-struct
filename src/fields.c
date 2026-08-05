@@ -63,7 +63,6 @@ static struct special_form special_form_of(
 static struct special_form form_within(PyObject * annotation, struct form_probes const * probes);
 static PyObject * optional_attribute(PyObject * object, char const * name);
 static struct special_form named_special_form(PyObject * text, struct form_probes const * probes);
-static bool annotates_with_text(PyObject * annotations);
 static bool names_form(PyObject * text, PyObject * needle);
 static bool continues_identifier(Py_UCS4 character);
 static PyObject * module_attribute(char const * module_name, char const * attribute);
@@ -187,27 +186,20 @@ static enum result append_declared(
 	}
 
 	/* From the same two strings the refusal quotes, so there is one spelling of
-	 * each form in the file. Built here and not in the matcher, which runs per
-	 * field and per form -- and only for a class that has text to match, since
-	 * building them for every class taxes the ones that never look. */
+	 * each form in the file. Built at the first text annotation rather than in
+	 * the matcher, which runs per field and per form, and not up front, which
+	 * taxes every class whose annotations are all objects.
+	 *
+	 * At the first one and not from a question asked of the dict beforehand:
+	 * the walk runs the class author's `__getattr__`, which can put a str into
+	 * this dict after such a question has answered "no text here". That is
+	 * exactly what happened -- the answer was cached, the needles stayed NULL,
+	 * and the injected str reached PyUnicode_GET_LENGTH(NULL). Deciding where
+	 * the value is used cannot go stale between the decision and the use. */
 	PY_MOVABLE(class_var_name, NULL);
 	PY_MOVABLE(init_var_name, NULL);
 
-	if (annotates_with_text(annotations)) {
-		class_var_name = PyUnicode_FromString(CLASS_VAR_FORM.name);
-		init_var_name = PyUnicode_FromString(INIT_VAR_FORM.name);
-
-		if (class_var_name == NULL || init_var_name == NULL) {
-			return RESULT_ERROR;
-		}
-	}
-
-	struct form_probes const probes = {
-		.class_var = class_var,
-		.init_var = init_var,
-		.class_var_name = class_var_name,
-		.init_var_name = init_var_name,
-	};
+	struct form_probes probes = {.class_var = class_var, .init_var = init_var};
 
 	/* The names are taken first, because the object path asks the annotation
 	 * for `__origin__` and `__args__` and that runs the class author's code --
@@ -230,6 +222,18 @@ static enum result append_declared(
 
 		if (annotation == NULL) {
 			continue;
+		}
+
+		if (PyUnicode_Check(annotation) && probes.class_var_name == NULL) {
+			class_var_name = PyUnicode_FromString(CLASS_VAR_FORM.name);
+			init_var_name = PyUnicode_FromString(INIT_VAR_FORM.name);
+
+			if (class_var_name == NULL || init_var_name == NULL) {
+				return RESULT_ERROR;
+			}
+
+			probes.class_var_name = class_var_name;
+			probes.init_var_name = init_var_name;
 		}
 
 		if (!PyUnicode_CheckExact(field_name)) {
@@ -402,14 +406,16 @@ static struct special_form special_form_of(
  * the text path refused the same source -- #14 again, on the path almost every
  * class takes. Both are walked now, per #57's ruling.
  *
- * It also makes the object path refuse `Annotated[int, ClassVar]`, where the
- * form is metadata rather than the type. That is not a new refusal: the text
- * path already refuses it and ships that way, and one answer is worth more
- * than two that disagree.
+ * It does not reach `Annotated[int, ClassVar]`, where the form is metadata
+ * rather than the type, because Annotated keeps metadata in __metadata__ and
+ * not in __args__ -- so that shape is still a field here while the text path
+ * refuses it. #57 owns the disagreement; when this comment claimed the walk had
+ * closed it, the test one file over already said otherwise.
  *
- * A str inside __args__ is walked, not matched -- `Annotated[int, "ClassVar"]`
- * is a string in a metadata slot, and the text matcher is for an annotation
- * that reached salix as source, not for anything that looks like one.
+ * A str reached by the walk is walked and not matched, which costs nothing
+ * today: the only strings in an __args__ are the ones a caller put there, and
+ * the text matcher is for an annotation that arrived as source rather than for
+ * anything that resembles one.
  *
  * A queue rather than a recursion, because clang-tidy's misc-no-recursion is an
  * error here and the shape does not need one: the frontier is what bounds the
@@ -484,23 +490,6 @@ static PyObject * optional_attribute(PyObject * const object, char const * const
  * before any of this. dataclasses guesses at those against sys.modules; this
  * does not.
  */
-/* The same question the matcher asks per field, asked once for the class: is
- * there any text here at all? Under `from __future__ import annotations` every
- * annotation is, and otherwise almost none are. */
-static bool annotates_with_text(PyObject * const annotations) {
-	PyObject * field_name;
-	PyObject * annotation;
-	Py_ssize_t position = 0;
-
-	while (PyDict_Next(annotations, &position, &field_name, &annotation)) {
-		if (PyUnicode_Check(annotation)) {
-			return true;
-		}
-	}
-
-	return false;
-}
-
 static struct special_form named_special_form(
 	PyObject * const text,
 	struct form_probes const * const probes
@@ -617,15 +606,10 @@ static PyObject * module_attribute(char const * const module_name, char const * 
 		return NULL;
 	}
 
-	PyObject * const found = PyObject_GetAttrString(module, attribute);
-
 	/* A module that exists without the attribute is a stdlib salix does not
-	 * recognise, not a failure. Anything else is. */
-	if (found == NULL && PyErr_ExceptionMatches(PyExc_AttributeError)) {
-		PyErr_Clear();
-	}
-
-	return found;
+	 * recognise, not a failure -- which is what optional_attribute means, so it
+	 * is what answers here rather than a second copy of it. */
+	return optional_attribute(module, attribute);
 }
 
 /* Build the defaults tuple as the trailing run of defaulted fields, and

@@ -296,24 +296,24 @@ def test_a_bare_form_inside_annotated_is_refused_on_the_object_path(form):
 
 
 @pytest.mark.parametrize(
-    "annotation",
+    ("annotation", "form"),
     [
-        Annotated[ClassVar[int], "m"] | None,
-        list[ClassVar[int]],
-        dict[str, ClassVar[int]],
-        tuple[ClassVar[int]],
-        list[InitVar[int]],
+        (Annotated[ClassVar[int], "m"] | None, "ClassVar"),
+        (list[ClassVar[int]], "ClassVar"),
+        (dict[str, ClassVar[int]], "ClassVar"),
+        (tuple[ClassVar[int]], "ClassVar"),
+        (list[InitVar[int]], "InitVar"),
     ],
     ids=["optional-annotated", "list", "dict-value", "tuple", "list-initvar"],
 )
-def test_a_form_kept_in_the_arguments_is_refused(annotation):
+def test_a_form_kept_in_the_arguments_is_refused(annotation, form):
     """#57's ruling: the walk reads `__args__` as well as `__origin__`, because
     a subscript keeps the form where a chain walk never looked. Every one of
     these was a field on the object path while the text path refused the same
     source, which is #14 on the path almost every class takes.
     """
 
-    with pytest.raises(TypeError, match="salix does not support"):
+    with pytest.raises(TypeError, match=f"annotated {form}"):
         type(Struct)("Nested", (Struct,), {"__annotations__": {"v": annotation}})
 
 
@@ -446,6 +446,34 @@ def test_an_annotation_that_rewrites_the_annotations_does_not_take_the_walk_with
     Built = type(Struct)("Rewritten", (Struct,), {"__annotations__": annotations})
 
     assert Built.__struct_fields__ == ("first", "last")
+
+
+def test_a_str_injected_during_the_walk_is_matched_rather_than_crashing():
+    """The text matcher's needles are built at the first str annotation, and
+    not from a question asked of the dict before the loop.
+
+    The walk runs the class author's `__getattr__`, which can put a str into
+    that dict after such a question has answered "there is no text here". That
+    combination segfaulted: the answer was cached, the needles stayed NULL, and
+    the injected str reached `PyUnicode_GET_LENGTH(NULL)`.
+
+    Asserted as the refusal it should be, because a segfault takes pytest with
+    it and there would be nothing left to report.
+    """
+
+    annotations = {}
+
+    class Injects:
+        def __getattr__(self, name: str) -> object:
+            if name == "__origin__":
+                annotations["late"] = "ClassVar[int]"
+
+            raise AttributeError(name)
+
+    annotations.update({"first": Injects(), "late": int})
+
+    with pytest.raises(TypeError, match="annotated ClassVar"):
+        type(Struct)("Injected", (Struct,), {"__annotations__": annotations})
 
 
 def test_the_object_path_is_skipped_when_neither_module_is_loaded(monkeypatch):
