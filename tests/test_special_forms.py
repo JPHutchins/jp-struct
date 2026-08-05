@@ -448,6 +448,49 @@ def test_an_annotation_that_rewrites_the_annotations_does_not_take_the_walk_with
     assert Built.__struct_fields__ == ("first", "last")
 
 
+@pytest.mark.skipif(sys.version_info < (3, 12), reason="PEP 695 `type` is a syntax error before 3.12")
+@pytest.mark.parametrize(
+    ("alias", "form"),
+    [
+        ("type Aliased = ClassVar[int]", "ClassVar"),
+        ("type Aliased = InitVar[int]", "InitVar"),
+        ("type Inner = ClassVar[int]\ntype Aliased = list[Inner]", "ClassVar"),
+    ],
+    ids=["ClassVar", "InitVar", "through-a-subscript"],
+)
+def test_a_pep_695_alias_is_the_form_it_aliases(alias, form):
+    """A `TypeAliasType` has neither `__origin__` nor `__args__`, so the walk
+    reads `__value__` as well -- asked only where the other two were absent,
+    which is what a TypeAliasType looks like and what an ordinary subscripted
+    annotation never does.
+
+    JPH approved this on #57 after the `__args__` walk landed; it is the same
+    #14 symptom reached by a different attribute.
+    """
+
+    namespace = {}
+    exec(f"from typing import ClassVar\nfrom dataclasses import InitVar\n{alias}", namespace)
+
+    with pytest.raises(TypeError, match=f"annotated {form}"):
+        type(Struct)("Aliased", (Struct,), {"__annotations__": {"v": namespace["Aliased"]}})
+
+
+@pytest.mark.skipif(sys.version_info < (3, 12), reason="PEP 695 `type` is a syntax error before 3.12")
+def test_a_pep_695_alias_to_something_else_is_still_a_field():
+    """The other direction: following `__value__` must not make every alias
+    suspect. One that aliases a plain type answers no, the way it did before.
+    """
+
+    namespace = {}
+    exec("type Aliased = int", namespace)
+
+    Ordinary = type(Struct)(
+        "Ordinary", (Struct,), {"__annotations__": {"v": namespace["Aliased"]}}
+    )
+
+    assert Ordinary.__struct_fields__ == ("v",)
+
+
 def test_a_str_injected_during_the_walk_is_matched_rather_than_crashing():
     """The text matcher's needles are built at the first str annotation, and
     not from a question asked of the dict before the loop.

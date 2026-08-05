@@ -468,6 +468,25 @@ static struct special_form form_within(
 		) {
 			form_frontier_push(&frontier, PyTuple_GET_ITEM(arguments, i));
 		}
+
+		/* A PEP 695 alias is the thing it aliases: `type CV = ClassVar[int]`
+		 * used as an annotation is a ClassVar, and walking to its __value__ is
+		 * what says so. Asked only where the other two were absent, because a
+		 * TypeAliasType has neither -- so every ordinary subscripted annotation
+		 * answers before this lookup happens. */
+		if (origin != NULL || arguments != NULL) {
+			continue;
+		}
+
+		PY_OWNED(aliased, optional_attribute(current, "__value__"));
+
+		if (PyErr_Occurred()) {
+			return (struct special_form){0};
+		}
+
+		if (aliased != NULL) {
+			form_frontier_push(&frontier, aliased);
+		}
 	}
 
 	return (struct special_form){0};
