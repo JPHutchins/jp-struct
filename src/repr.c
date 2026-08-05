@@ -61,7 +61,7 @@ static PyObject * field_repr(
 	PyObject * const self,
 	Py_ssize_t const index
 ) {
-	PyObject * const value = *struct_slot(type, self, index);
+	PY_OWNED(value, struct_slot_ref(type, self, index));
 
 	PY_OWNED(rendered, value != NULL ? PyObject_Repr(value) : PyUnicode_FromString("<unset>"));
 

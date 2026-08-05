@@ -44,9 +44,7 @@ Py_hash_t Struct_hash(PyObject * const self) {
 		return HASH_ERR;
 	}
 
-	for (Py_ssize_t i = 0; i < type->struct_field_count; ++i) {
-		PyTuple_SET_ITEM(values, i, Py_NewRef(struct_slot_or_none(type, self, i)));
-	}
+	struct_slots_ref_or_none_into(type, self, values);
 
 	if (Py_EnterRecursiveCall(" while hashing a struct") != 0) {
 		return HASH_ERR;
