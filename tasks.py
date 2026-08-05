@@ -176,7 +176,24 @@ wheel_test = Task(
     env={"SALIX_REQUIRE_INSTALLED": "1"},
 )
 
+# python-build-standalone has no Windows ARM64 build below 3.11, so the wheel
+# set has no cp310 win_arm64 to import and the leg below cannot ask for one.
+WINDOWS_ARM_OLDEST = "3.11"
+
+# Spelled out, because a bare version is not enough on this one runner: uv
+# resolves `--python 3.15` there to the *x86_64* build, Windows ARM64 runs it
+# under emulation, and an emulated interpreter installs win_amd64 -- so the leg
+# passed twice while importing the wheel windows-latest already imports. The
+# architecture is the whole point of the leg, so it is named.
+WINDOWS_ARM_PYTHON = "cpython-{}-windows-aarch64"
+
 # Sampled rather than crossed, to stay inside the OSS concurrency limit.
+#
+# The last four legs are the machines that can load what the macos-latest and
+# windows-latest legs cannot: macos-latest is Apple silicon and windows-latest
+# is x86_64, which left macosx_10_13_x86_64 and win_arm64 shipping inspected by
+# check_wheel.py and imported by nothing (#37). Both are cross-compiled by zig,
+# which is the half of the build with nobody standing behind it.
 coverage = Parallel(
     wheel_test,
     variants=(
@@ -185,6 +202,10 @@ coverage = Parallel(
         {"OS": "macos-latest", "PY": NEWEST},
         {"OS": "windows-latest", "PY": OLDEST},
         {"OS": "windows-latest", "PY": NEWEST},
+        {"OS": "macos-15-intel", "PY": OLDEST},
+        {"OS": "macos-15-intel", "PY": NEWEST},
+        {"OS": "windows-11-arm", "PY": WINDOWS_ARM_PYTHON.format(WINDOWS_ARM_OLDEST)},
+        {"OS": "windows-11-arm", "PY": WINDOWS_ARM_PYTHON.format(NEWEST)},
     ),
 )
 

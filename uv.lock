@@ -1091,6 +1091,9 @@ version = "0.0.0"
 source = { virtual = "." }
 
 [package.dev-dependencies]
+ci = [
+    { name = "camas" },
+]
 dev = [
     { name = "camas", extra = ["mcp"] },
     { name = "setuptools" },
@@ -1099,6 +1102,7 @@ dev = [
 [package.metadata]
 
 [package.metadata.requires-dev]
+ci = [{ name = "camas", specifier = "==0.1.29" }]
 dev = [
     { name = "camas", extras = ["mcp"], specifier = "==0.1.29" },
     { name = "setuptools", specifier = ">=77" },

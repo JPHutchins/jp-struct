@@ -6,7 +6,15 @@ those three are exactly where an assumption about the type would bite.
 """
 
 import pytest
-from values import EVERY, HASHABLE, UNHASHABLE, Inner, Outer, identify
+from values import (
+    COPIED_WHEN_EMPTY,
+    EVERY,
+    HASHABLE,
+    UNHASHABLE,
+    Inner,
+    Outer,
+    identify,
+)
 
 from salix import Struct
 
@@ -30,11 +38,31 @@ def test_a_value_survives_a_round_trip_unchanged(value):
 
 @pytest.mark.parametrize("value", EVERY, ids=identify)
 def test_a_value_may_be_a_default(value):
+    if type(value) in COPIED_WHEN_EMPTY and len(value) > 0:
+        with pytest.raises(TypeError, match="non-empty"):
+
+            class Refused(Struct):
+                field: object = value
+
+        return
+
     class Local(Struct):
         field: object = value
 
-    assert Local().field is value
-    assert Local().__struct_defaults__ == (value,)
+    (stored,) = Local.__struct_defaults__
+
+    assert Local().field == value
+    assert stored == value
+
+    if type(value) in COPIED_WHEN_EMPTY:
+        # Two copies, not one: the class keeps its own, severed from whatever
+        # the body named, and each instance keeps one severed from the class's.
+        assert stored is not value
+        assert Local().field is not stored
+        assert Local().field is not Local().field
+    else:
+        assert stored is value
+        assert Local().field is value
 
 
 @pytest.mark.parametrize("value", EVERY, ids=identify)

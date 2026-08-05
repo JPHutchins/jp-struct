@@ -24,7 +24,7 @@ jobs:
       github.event.workflow_run.event == 'pull_request' &&
       (github.event.workflow_run.conclusion == 'success' ||
        github.event.workflow_run.conclusion == 'failure')
-    uses: JPHutchins/code-review/.github/workflows/review-reusable.yaml@v0.1.0-alpha.33
+    uses: JPHutchins/code-review/.github/workflows/review-reusable.yaml@v0.1.0-alpha.36
     with:
       head_sha:      ${{ github.event.workflow_run.head_sha }}
       head_branch:   ${{ github.event.workflow_run.head_branch }}
@@ -33,7 +33,7 @@ jobs:
       conclusion:    ${{ github.event.workflow_run.conclusion }}
       trigger_event: ${{ github.event.workflow_run.event }}
       api_base_url:  ${{ vars.API_BASE_URL }}
-      model_full:    deepseek-v4-pro
+      model_full:    deepseek-v4-flash
       model_mechanic: deepseek-v4-flash
       # Check-running via our own Nix composite at .github/actions/code-review-setup, because the dev
       # shell is the only supported environment here and clang-tidy, gcc -fanalyzer, and the nix
@@ -73,6 +73,7 @@ jobs:
         static.crates.io:443
         index.crates.io:443
         pypi.org:443
+        *.actions.githubusercontent.com:443
       mechanic_time_limit: 3m
       mechanic_grace_period: 90s
       mechanic_usd_limit: "0.10"

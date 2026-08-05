@@ -40,7 +40,10 @@ jobs:
           # this job deliberately does not have; CI owns the cache.
           save: false
 
-      - run: nix develop --command uv sync --no-install-workspace
+      # --only-group ci: check_tag.py is stdlib-only and camas ci brings its own
+      # tools, so the dev group's camas[mcp] would only be a local agent's
+      # dependency tree standing between a tag and a release.
+      - run: nix develop --command uv sync --no-install-workspace --only-group ci
 
       # Through env: so the tag reaches the shell as a value, never as text.
       - env:

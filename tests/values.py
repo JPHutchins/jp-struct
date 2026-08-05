@@ -14,6 +14,25 @@ import typing
 
 from salix import Struct
 
+# Exactly these four, not subclasses of them: the copy has to preserve the type,
+# and a PyDict_Copy of a defaultdict is a dict. Empty ones are copied per
+# instance; a non-empty one is refused, because copying it could only be shallow
+# and its contents would still be shared. `struct_copies_default` in
+# src/construct.h is what this mirrors, and it is the only list of the four that
+# the suite keeps.
+COPIED_WHEN_EMPTY = (list, dict, set, bytearray)
+
+# A non-empty instance of each, for the half of the rule that refuses rather
+# than copies. The types come from the tuple above; only the contents are
+# spelled here, because no one seed constructs all four -- dict wants pairs and
+# bytearray wants small ints. The assertion is what keeps the two from drifting.
+NON_EMPTY = {list: [1], dict: {"k": 1}, set: {1}, bytearray: bytearray(b"x")}
+
+# A seed is an exact instance of its own key, and it is non-empty; `b"x"` is a
+# bytes rather than a bytearray and would not be refused at all.
+assert set(NON_EMPTY) == set(COPIED_WHEN_EMPTY)
+assert all(type(value) is kind and len(value) > 0 for kind, value in NON_EMPTY.items())
+
 
 class Colour(enum.Enum):
     RED = 1
@@ -114,7 +133,9 @@ def _unhashable() -> tuple[object, ...]:
         [1, 2],
         {},
         {"key": "value"},
+        set(),
         {1, 2},
+        bytearray(),
         bytearray(b"bytes"),
         array.array("i", [1, 2]),
         memoryview(bytearray(b"bytes")),
@@ -125,6 +146,15 @@ def _unhashable() -> tuple[object, ...]:
 HASHABLE = _hashable()
 UNHASHABLE = _unhashable()
 EVERY = HASHABLE + UNHASHABLE
+
+# Both halves of the rule are reached by parametrizing over these, so each of
+# the four needs an empty instance and a non-empty one. set and bytearray had
+# only the non-empty one, which left the copy -- and with it the severing that
+# class creation does -- asserted for list and dict alone.
+assert all(
+    {not value for value in UNHASHABLE if type(value) is kind} == {True, False}
+    for kind in COPIED_WHEN_EMPTY
+)
 
 
 def identify(value: object) -> str:

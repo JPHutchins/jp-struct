@@ -70,7 +70,34 @@ def test_keyword_binding_takes_the_same_count_as_positional():
     del pair
 
 
-def test_a_default_is_shared_by_every_instance():
+def test_a_copied_default_hands_out_no_reference_to_itself():
+    """The other half of the default story, and the one this file did not have:
+    a mutable default is copied per instance, so the stored default's count does
+    not move however many instances exist, and each copy goes with its own.
+    """
+
+    class Holder(Struct):
+        xs: list = []  # noqa: RUF012 -- the copy is what is being counted
+
+    (stored,) = Holder.__struct_defaults__
+    before = sys.getrefcount(stored)
+    instances = [Holder() for _ in range(10)]
+
+    assert sys.getrefcount(stored) == before
+    assert all(instance.xs is not stored for instance in instances)
+    assert len({id(instance.xs) for instance in instances}) == 10
+
+    del instances
+    gc.collect()
+
+    assert sys.getrefcount(stored) == before
+
+
+def test_an_uncopied_default_is_shared_by_every_instance():
+    """`Sentinel()` is not one of the four, so this is the sharing path -- the
+    name says which of the two it pins, now that both exist.
+    """
+
     default = Defaulted.__struct_defaults__ if hasattr(Defaulted, "__struct_defaults__") else None
     sentinel = Defaulted(None).optional
     before = sys.getrefcount(sentinel)

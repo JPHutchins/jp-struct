@@ -62,6 +62,21 @@ packages = ["salix"]
 salix = ["py.typed", "__init__.pyi"]
 
 [dependency-groups]
+# The task runner, which is the whole of what CI needs: every task either runs
+# in-process or shells out through `uv run --no-project --with ...`, which
+# brings its own tools.
+#
+# The mcp extra is for a local agent driving camas through its MCP server, and
+# nothing in CI talks to one. It is also uninstallable on one of the platforms
+# CI now covers -- mcp asks for pyjwt[crypto], which asks for cryptography,
+# which ships no win_arm64 wheel and so builds itself from a Rust crate against
+# OpenSSL.
+#
+# Both spell the version out. An earlier shape had dev take the pin from an
+# include-group and name the extra unpinned, which reads as one source of truth
+# and is not one: nothing in it says camas[mcp] may not resolve elsewhere. A
+# repeated pin that uv.lock keeps honest beats a clever one that can come loose.
+ci = ["camas==0.1.29"]
 dev = ["setuptools>=77", "camas[mcp]==0.1.29"]
 
 [tool.pyright]
