@@ -2,12 +2,8 @@ from typing import Any, Final
 
 from typing_extensions import dataclass_transform
 
-class StructMeta(type):
-    __struct_fields__: Final[tuple[str, ...]]
-    __struct_defaults__: Final[tuple[Any, ...]]
-
 @dataclass_transform(frozen_default=True)
-class Struct(metaclass=StructMeta):
+class Struct:
     __struct_fields__: Final[tuple[str, ...]]
     __struct_defaults__: Final[tuple[Any, ...]]
     def __init_subclass__(

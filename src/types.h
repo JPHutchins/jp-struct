@@ -1,7 +1,9 @@
 #pragma once
 
 #include <Python.h>
+#include <stdbool.h>
 
+#include "meta.h"
 #include "options.h"
 
 /* PyMemberDef only became visible through Python.h in 3.12, and the member
@@ -47,6 +49,21 @@ typedef struct {
 	 * rule put it there. */
 	bool struct_resolves_body_eq;
 } StructType;
+
+/*
+ * Only an instance of StructMeta has the storage declared above; every other
+ * type stops at PyHeapTypeObject, and reading a field off one is a read past
+ * the end of its allocation. _StructMixin is a permitted base and Struct.__mro__
+ * hands it out, so a subclass of it whose metaclass is plain `type` reaches
+ * every slot the mixin installs while being no such thing.
+ */
+static inline bool is_struct_class(PyObject * const object) {
+	return PyObject_TypeCheck(object, &StructMeta_Type);
+}
+
+static inline bool is_struct(PyObject * const self) {
+	return is_struct_class((PyObject *) Py_TYPE(self));
+}
 
 static inline StructType * struct_type_of(PyObject * const self) {
 	return (StructType *) Py_TYPE(self);
@@ -94,6 +111,30 @@ static inline Py_ssize_t struct_required_count(StructType const * const type) {
  * tuple is the honest answer rather than None. */
 static inline PyObject * struct_tuple_or_empty(PyObject * const tuple) {
 	return tuple != NULL ? Py_NewRef(tuple) : PyTuple_New(0);
+}
+
+/* Which of the two metadata tuples is being asked for. The class answers
+ * through the metaclass and the instance through the mixin, so without this the
+ * same read is written out four times. */
+enum struct_metadata : int {
+	STRUCT_FIELD_NAMES,
+	STRUCT_DEFAULTS,
+};
+
+static inline PyObject * struct_metadata(
+	StructType const * const type,
+	enum struct_metadata const which
+) {
+	/* Matched rather than tested, so that a third kind of metadata is a
+	 * compiler error here instead of whatever the false arm happened to be. */
+	switch (which) {
+		case STRUCT_FIELD_NAMES:
+			return struct_tuple_or_empty(type->struct_field_names);
+		case STRUCT_DEFAULTS:
+			return struct_tuple_or_empty(type->struct_defaults);
+	}
+
+	Py_UNREACHABLE();
 }
 
 /* Access the PyMemberDef array that floats behind a heap type. Mirrors

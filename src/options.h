@@ -22,6 +22,20 @@ struct options {
 	bool weakref;
 };
 
+/* Field by field, because a struct of bools has padding and memcmp would read
+ * it. Adding an option to the struct without adding it here is the one way to
+ * get this wrong, which is why they are spelled rather than counted. */
+static inline bool options_agree(struct options const left, struct options const right) {
+	return (
+		left.frozen == right.frozen &&
+		left.eq == right.eq &&
+		left.order == right.order &&
+		left.repr == right.repr &&
+		left.match_args == right.match_args &&
+		left.weakref == right.weakref
+	);
+}
+
 /* Whether the class body's keywords were accepted, and what they resolved to. */
 struct options_request {
 	enum { OPTIONS_RESOLVED, OPTIONS_REJECTED } tag;

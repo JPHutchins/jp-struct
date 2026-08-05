@@ -69,9 +69,15 @@ def ordering_against_an_unrelated_struct_is_rejected() -> None:
 
 
 def an_unknown_class_keyword_is_rejected() -> None:
-    """pyright's and ty's; mypy does not check keywords against __init_subclass__."""
+    """All three, since the stub stopped naming a metaclass: a class keyword
+    goes to the metaclass when there is one, and mypy stops checking it against
+    __init_subclass__ there.
+    """
 
-    class Typo(Struct, frozn=False):  # pyright: ignore[reportGeneralTypeIssues, reportCallIssue]
+    class Typo(  # type: ignore[call-arg]
+        Struct,
+        frozn=False,  # pyright: ignore[reportCallIssue]
+    ):
         value: int
 
 

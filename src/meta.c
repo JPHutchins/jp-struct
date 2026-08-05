@@ -26,6 +26,14 @@ static int StructMeta_traverse(PyObject * self, visitproc visit, void * arg);
 static int StructMeta_clear(PyObject * self);
 static void StructMeta_dealloc(PyObject * self);
 
+static PyObject * build_struct_class(
+	PyTypeObject * metatype,
+	StructType const * base,
+	PyObject * name,
+	PyObject * bases,
+	PyObject * original_namespace,
+	PyObject * keywords
+);
 static StructType * find_struct_base(PyObject * bases);
 static bool has_weakref_slot(StructType const * base);
 static struct options base_options(StructType const * base);
@@ -61,12 +69,18 @@ static StructType * create_class(
 	PyObject * bases,
 	PyObject * namespace
 );
+static PyTypeObject * winning_metatype(PyTypeObject * requested, PyObject * bases);
 static enum result install_fields(
 	StructType * struct_class,
 	StructType const * base,
 	struct field_plan const * plan,
 	struct options options,
 	bool resolves_body_eq
+);
+static enum result reject_unless_planned(
+	StructType const * struct_class,
+	struct field_plan const * plan,
+	struct options options
 );
 static enum result install_post_init(StructType * struct_class);
 static bool defines_own_init(StructType const * struct_class);
@@ -89,7 +103,7 @@ static struct member_lookup find_member(
 
 PyTypeObject StructMeta_Type = {
 	PyVarObject_HEAD_INIT(NULL, 0)
-	.tp_name = "salix.StructMeta",
+	.tp_name = "salix._StructMeta",
 	.tp_basicsize = sizeof(StructType),
 	.tp_itemsize = sizeof(PyMemberDef),
 	.tp_flags = (
@@ -126,17 +140,23 @@ static PyGetSetDef StructMeta_getset[] = {
 };
 
 static PyObject * StructMeta_get_field_names(PyObject * const self, void * const closure) {
-	return struct_tuple_or_empty(((StructType *) self)->struct_field_names);
+	return struct_metadata((StructType *) self, STRUCT_FIELD_NAMES);
 }
 
 static PyObject * StructMeta_get_defaults(PyObject * const self, void * const closure) {
-	return struct_tuple_or_empty(((StructType *) self)->struct_defaults);
+	return struct_metadata((StructType *) self, STRUCT_DEFAULTS);
 }
 
 /*
- * Creating a struct class is four steps: work out the fields, build the
- * namespace type.__new__ wants, make the type, then hand it the field table
- * that makes it a struct.
+ * Everything a struct does comes from _StructMixin, and every struct class
+ * carries it because Struct does. A class with no struct base has no way to
+ * have got it: it would build, construct, report its fields, and be a struct
+ * in every visible way except behaviour.
+ *
+ * The one class that legitimately has no struct base is Struct, and the module
+ * builds it through struct_create_root rather than through here -- so this
+ * refusal has no exception to carve out, and there is no shape of `bases` that
+ * gets a caller past it.
  */
 PyObject * StructMeta_new(
 	PyTypeObject * const metatype,
@@ -150,7 +170,7 @@ PyObject * StructMeta_new(
 	if (
 		!PyArg_ParseTuple(
 			args,
-			"UO!O!:StructMeta.__new__",
+			"UO!O!:_StructMeta.__new__",
 			&name,
 			&PyTuple_Type,
 			&bases,
@@ -162,6 +182,43 @@ PyObject * StructMeta_new(
 	}
 
 	StructType const * const base = find_struct_base(bases);
+
+	if (base == NULL) {
+		PyErr_SetString(
+			PyExc_TypeError,
+			"a struct class inherits salix.Struct; the metaclass of one is not a "
+			"way to make one"
+		);
+
+		return NULL;
+	}
+
+	return build_struct_class(metatype, base, name, bases, original_namespace, keywords);
+}
+
+/* Struct itself, built once from module init. The only class with no struct
+ * base, and the only caller that does not come through a metaclass call. */
+PyObject * struct_create_root(
+	PyObject * const name,
+	PyObject * const bases,
+	PyObject * const namespace
+) {
+	return build_struct_class(&StructMeta_Type, NULL, name, bases, namespace, NULL);
+}
+
+/*
+ * Creating a struct class is four steps: work out the fields, build the
+ * namespace type.__new__ wants, make the type, then hand it the field table
+ * that makes it a struct.
+ */
+static PyObject * build_struct_class(
+	PyTypeObject * const metatype,
+	StructType const * const base,
+	PyObject * const name,
+	PyObject * const bases,
+	PyObject * const original_namespace,
+	PyObject * const keywords
+) {
 	struct options const inherited = base_options(base);
 	struct options_request const request =
 		options_read(keywords, inherited, base != NULL && base->struct_field_count > 0);
@@ -203,18 +260,27 @@ PyObject * StructMeta_new(
 		NULL
 	);
 
-	if (
-		struct_class != NULL &&
-		install_fields(
+	/* create_class builds as the winning metatype, so the ordinary handoff no
+	 * longer comes back here already installed. What still can is a metaclass
+	 * __new__ that returned a struct class -- possibly one it did not just make,
+	 * whose slot offsets belong to a layout this plan knows nothing about.
+	 * Installing over that is a field table pointed at the wrong memory, so the
+	 * class it did build is held to what this call planned instead. */
+	if (struct_class != NULL) {
+		enum result const settled = (
+			struct_class->struct_field_names == NULL ? install_fields(
 				struct_class,
 				base,
 				&plan,
 				request.options,
 				body_defines_eq || inherits_body_eq
-			) !=
-			RESULT_OK
-	) {
-		Py_CLEAR(struct_class);
+			) :
+			reject_unless_planned(struct_class, &plan, request.options)
+		);
+
+		if (settled != RESULT_OK) {
+			Py_CLEAR(struct_class);
+		}
 	}
 
 	field_plan_clear(&plan);
@@ -228,7 +294,7 @@ static StructType * find_struct_base(PyObject * const bases) {
 	for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(bases); ++i) {
 		PyObject * const base = PyTuple_GET_ITEM(bases, i);
 
-		if (PyObject_TypeCheck(base, &StructMeta_Type)) {
+		if (is_struct_class(base)) {
 			return (StructType *) base;
 		}
 	}
@@ -471,7 +537,118 @@ static StructType * create_class(
 		return NULL;
 	}
 
-	return (StructType *) PyType_Type.tp_new(metatype, type_args, NULL);
+	/* type_new hands off to the winning metatype's tp_new when that is not the
+	 * one it was given. Where the winner would only land back in StructMeta_new,
+	 * building as the winner in the first place reaches the same class without
+	 * the round trip -- which re-planned from the transformed namespace and with
+	 * no keywords, so the requested options and the body's defaults were gone by
+	 * the time it returned. */
+	PyTypeObject * const winner = winning_metatype(metatype, bases);
+	PyTypeObject * const builder = winner->tp_new == StructMeta_new ? winner : metatype;
+	PY_MOVABLE(created, PyType_Type.tp_new(builder, type_args, NULL));
+
+	if (created == NULL) {
+		return NULL;
+	}
+
+	/* A StructMeta subclass overriding __new__ still decides what comes back
+	 * here -- and install_fields writes StructType storage into it. */
+	if (!is_struct_class(created)) {
+		PyErr_Format(
+			PyExc_TypeError,
+			"%.200s.__new__ returned %.200s, which is not a struct class",
+			winner->tp_name,
+			Py_TYPE(created)->tp_name
+		);
+
+		return NULL;
+	}
+
+	return (StructType *) py_move(&created);
+}
+
+/*
+ * type_new's own rule: the most derived of the requested metatype and the
+ * bases' metatypes builds the class. CPython keeps that rule in
+ * _PyType_CalculateMetaclass, which is not in the public API, so it is written
+ * out here rather than called.
+ *
+ * Only the winner is wanted, and only to decide who builds, so a conflict needs
+ * no answer here -- whatever this returns, type_new recomputes the winner and
+ * raises the metaclass-conflict error it has always raised. For unrelated
+ * metatypes that is the first one this locked onto rather than the requested
+ * one, which is why the loop can stay this simple.
+ *
+ * It is the third walk of `bases` in a class creation, after find_struct_base
+ * and _PyType_CalculateMetaclass. Measured, and smaller than the measurement:
+ * replacing the body with `return requested` leaves class creation at 9.77-9.87
+ * us for a 16-field class either way, so the walk is bounded by the width of
+ * that band rather than shown to be free. It is one Py_TYPE and one
+ * PyType_IsSubtype per base, and a class has one.
+ */
+static PyTypeObject * winning_metatype(PyTypeObject * const requested, PyObject * const bases) {
+	PyTypeObject * winner = requested;
+
+	for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(bases); ++i) {
+		PyTypeObject * const candidate = Py_TYPE(PyTuple_GET_ITEM(bases, i));
+
+		if (PyType_IsSubtype(candidate, winner)) {
+			winner = candidate;
+		}
+	}
+
+	return winner;
+}
+
+/*
+ * The class came back already a struct, which means something other than this
+ * call built it. A metaclass __new__ written in Python is one such thing: it is
+ * re-entered through type_new with no keywords and a namespace the transform
+ * has already taken the body defaults out of, so the class it installs is
+ * planned from less than this call was handed. The options and the defaults are
+ * where that shows.
+ *
+ * Refused rather than returned, and rather than installed over: the field table
+ * this call planned describes a layout that class may not have. #55 is where
+ * the hand-off itself is argued -- until it forwards what it was given, a
+ * caller gets an error instead of a class that quietly is not the one asked
+ * for.
+ */
+static enum result reject_unless_planned(
+	StructType const * const struct_class,
+	struct field_plan const * const plan,
+	struct options const options
+) {
+	PY_OWNED(planned, PyList_AsTuple(plan->all_names));
+
+	if (planned == NULL) {
+		return RESULT_ERROR;
+	}
+
+	int const same_fields =
+		PyObject_RichCompareBool(struct_class->struct_field_names, planned, Py_EQ);
+
+	if (same_fields < 0) {
+		return RESULT_ERROR;
+	}
+
+	if (
+		same_fields == 1 &&
+		struct_class->struct_default_count == PyTuple_GET_SIZE(plan->defaults) &&
+		options_agree(struct_class->struct_options, options)
+	) {
+		return RESULT_OK;
+	}
+
+	PyErr_Format(
+		PyExc_TypeError,
+		"%.200s.__new__ returned a struct class this call did not plan: its "
+		"metaclass is re-entered without the keywords or the class body's "
+		"defaults, so what it built is not what was asked for",
+		Py_TYPE(struct_class)->tp_name
+	);
+
+	return RESULT_ERROR;
 }
 
 /* The type exists but is not yet a struct; this is what makes it one. */

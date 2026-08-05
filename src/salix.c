@@ -8,9 +8,11 @@
  * The design is a deliberately stripped-down clone of msgspec's ``Struct``
  * machinery (see msgspec's src/msgspec/_core.c):
  *
- *   - ``StructMeta``  : a C metaclass whose ``tp_new`` builds the struct type
+ *   - ``_StructMeta`` : a C metaclass whose ``tp_new`` builds the struct type
  *                       at class-creation time, entirely in C (no ``exec``, no
  *                       ``inspect``).  This is what makes type creation fast.
+ *                       Not exported: `type(Struct)` is the only way to it, and
+ *                       there is nothing to do with it that `Struct` does not.
  *   - ``Struct``      : the public base class.  Subclasses declare fields with
  *                       class-body annotations (``a: int``), exactly like
  *                       NamedTuple/dataclass/msgspec.
@@ -85,11 +87,7 @@ static int struct_exec(PyObject * const module) {
 		return RESULT_ERROR;
 	}
 
-	if (add_struct_base(module) != RESULT_OK) {
-		return RESULT_ERROR;
-	}
-
-	return PyModule_AddObjectRef(module, "StructMeta", (PyObject *) &StructMeta_Type);
+	return add_struct_base(module);
 }
 
 static enum result add_struct_base(PyObject * const module) {
@@ -123,11 +121,5 @@ static PyObject * create_struct_base(void) {
 		return NULL;
 	}
 
-	PY_OWNED(args, PyTuple_Pack(3, name, bases, namespace));
-
-	if (args == NULL) {
-		return NULL;
-	}
-
-	return StructMeta_new(&StructMeta_Type, args, NULL);
+	return struct_create_root(name, bases, namespace);
 }
