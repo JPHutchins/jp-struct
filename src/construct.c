@@ -189,10 +189,97 @@ static enum result fill_defaults(
 			return RESULT_ERROR;
 		}
 
-		*slot = Py_NewRef(PyTuple_GET_ITEM(type->struct_defaults, i - required_count));
+		PyObject * const value = struct_default_copy(
+			PyTuple_GET_ITEM(type->struct_defaults, i - required_count)
+		);
+
+		if (value == NULL) {
+			return RESULT_ERROR;
+		}
+
+		*slot = value;
 	}
 
 	return RESULT_OK;
+}
+
+/*
+ * A mutable default belongs to the instance, not to the class: `xs: list = []`
+ * reads as an empty list per struct, and handing every instance the same one is
+ * a bug people write by accident. The four builtins that spell "container I
+ * will mutate" are copied, and only when empty -- a non-empty one is refused at
+ * class creation, since copying it could only be shallow.
+ *
+ * Class creation takes a copy too, so what the class stores is not the object
+ * the body named. `shared = []` kept at module level and appended to afterwards
+ * would otherwise make the stored default non-empty behind the refusal's back,
+ * and every instance would get a shallow copy of it. msgspec severs the same
+ * alias by turning the default into a Factory.
+ *
+ * Everything else is shared, and "everything else" is wider than it sounds.
+ * Sharing is right for an int, a string or a tuple of them, and for a frozen
+ * struct of them: none can be rebound or mutated. It is wrong for two kinds of
+ * default this does not reach -- a shallowly-immutable container of something
+ * mutable (`([],)`, a frozen struct holding a list), and a mutable container
+ * that simply is not one of the four (`array.array`, `deque`, `defaultdict`, a
+ * writable `memoryview`, or a subclass of any of the four). Those are shared
+ * outright, and a non-empty one is not refused either, because the refusal
+ * whitelists the same four types.
+ *
+ * Every one of them is unhashable, which is the single test that would replace
+ * this list; #51 is where that is argued. msgspec shares them as well.
+ *
+ * dataclasses refuses the shape outright and needs default_factory to express
+ * it at all. This copies, so the common spelling means what it looks like it
+ * means, and pays for it only on the fields that have one.
+ *
+ * The type and the constructor that copies it are named together, because no
+ * predicate can supply the second. One list, so the refusal and the copy cannot
+ * come to different answers about which types those are.
+ *
+ * A list of statements rather than a static array of {type, constructor}: on
+ * Windows a `PyTypeObject` is imported from python3.dll, and the address of a
+ * dllimport symbol is not a compile-time constant, so the array version
+ * compiles everywhere except the platform half the wheels are cross-built for.
+ */
+typedef PyObject * (*default_copier)(PyObject * declared);
+
+/* PyList_GetSlice takes bounds; the other three constructors take the object. */
+static PyObject * copy_list(PyObject * const declared) {
+	return PyList_GetSlice(declared, 0, PyList_GET_SIZE(declared));
+}
+
+static default_copier copies_default(PyTypeObject const * const kind) {
+	if (kind == &PyList_Type) {
+		return copy_list;
+	}
+
+	if (kind == &PyDict_Type) {
+		return PyDict_Copy;
+	}
+
+	if (kind == &PySet_Type) {
+		return PySet_New;
+	}
+
+	if (kind == &PyByteArray_Type) {
+		return PyByteArray_FromObject;
+	}
+
+	return NULL;
+}
+
+bool struct_copies_default(PyTypeObject const * const kind) {
+	return copies_default(kind) != NULL;
+}
+
+PyObject * struct_default_copy(PyObject * const declared) {
+	default_copier const copy = copies_default(Py_TYPE(declared));
+
+	/* Everything else is the object itself, a subclass of one of the four
+	 * included: copying with a constructor for the wrong type would change the
+	 * value. */
+	return copy != NULL ? copy(declared) : Py_NewRef(declared);
 }
 
 /*

@@ -2,6 +2,7 @@
 #include <stdbool.h>
 
 #include "annotations.h"
+#include "construct.h"
 #include "fields.h"
 #include "owned.h"
 #include "result.h"
@@ -27,6 +28,7 @@ static enum result append_declared(
 	PyObject * default_by_name
 );
 static PyObject * build_defaults(PyObject * all_names, PyObject * default_by_name);
+static enum result reject_unsafe_default(PyObject * field_name, PyObject * value);
 static PyObject * checked_annotations(PyObject * namespace);
 static enum inheritance inherits_field(StructType const * base, PyObject * field_name);
 
@@ -187,6 +189,48 @@ static enum inheritance inherits_field(StructType const * const base, PyObject *
 	return INHERITANCE_NEW;
 }
 
+/*
+ * An empty mutable container is copied per instance, so it means what it looks
+ * like it means. A non-empty one cannot be: copying it is necessarily shallow,
+ * and `xs: list = [[1]]` would hand every instance its own outer list around
+ * the *same* inner one -- an aliasing bug one level down from the one being
+ * fixed. Refused instead, which is what msgspec does and for the same reason.
+ *
+ * Only the exact builtins, because the copy has to preserve the type and
+ * PyDict_Copy of a defaultdict is a dict. A subclass is shared, as it is
+ * there.
+ *
+ * It over-fires deliberately on a class whose body writes its own __init__.
+ * That class displaces the generated constructor, so its declared default is
+ * never handed to an instance at all -- and the same is true of every subclass
+ * below it. #56 is where the whole question of a dead default belongs, and
+ * refusing the same shape everywhere is the answer until it is settled. The
+ * message states the rule rather than a consequence for that reason, and names
+ * the remedy that still works there: __post_init__ runs from the constructor a
+ * body __init__ displaces, so only set_field from that __init__ is left.
+ */
+static enum result reject_unsafe_default(PyObject * const field_name, PyObject * const value) {
+	PyTypeObject * const kind = Py_TYPE(value);
+	Py_ssize_t const filled = struct_copies_default(kind) ? PyObject_Size(value) : 0;
+
+	if (filled <= 0) {
+		return filled < 0 ? RESULT_ERROR : RESULT_OK;
+	}
+
+	PyErr_Format(
+		PyExc_TypeError,
+		"field '%U' defaults to a non-empty %.100s, whose copy could only be "
+		"shallow and would leave the contents shared; default it to an empty "
+		"one and fill it with set_field -- from __post_init__, or from your own "
+		"__init__ if the body writes one, which displaces the constructor "
+		"__post_init__ runs from",
+		field_name,
+		kind->tp_name
+	);
+
+	return RESULT_ERROR;
+}
+
 /* Build the defaults tuple as the trailing run of defaulted fields, and
  * enforce that no required field follows a defaulted one (same rule as
  * Python function signatures). */
@@ -222,9 +266,42 @@ static PyObject * build_defaults(PyObject * const all_names, PyObject * const de
 	}
 
 	for (Py_ssize_t i = first_default; i < field_count; ++i) {
-		PyObject * const value = PyDict_GetItem(default_by_name, PyList_GET_ITEM(all_names, i));
+		PyObject * const field_name = PyList_GET_ITEM(all_names, i);
+		PyObject * const value = PyDict_GetItem(default_by_name, field_name);
 
-		PyTuple_SET_ITEM(defaults, i - first_default, Py_NewRef(value));
+		/* Twice, on purpose. The first read is what raises in the ordinary case,
+		 * but its verdict is not final: it reads an object the module still
+		 * holds and can still write to between the two checks. It earns its
+		 * place by being O(1) and keeping a default that is going to be refused
+		 * from being built into a copy that is then thrown away -- that copy is
+		 * the whole of what it saves, since copying a set hashes nothing
+		 * (PySet_New copies the table).
+		 *
+		 * The second read is the one that counts, because it reads the copy --
+		 * what the class keeps, and what no module-level alias still points at.
+		 * A racing write is captured by the copy (the copy is made from the
+		 * declaration, so of course it is) and refused there, so the race costs
+		 * the work the first check exists to skip and not the invariant.
+		 *
+		 * `__struct_defaults__` still hands the stored object out, so filling it
+		 * through there defeats this. That route is out of contract and #51 is
+		 * where the whole type list is argued. */
+		if (reject_unsafe_default(field_name, value) != RESULT_OK) {
+			Py_DECREF(defaults);
+
+			return NULL;
+		}
+
+		PyObject * const stored = struct_default_copy(value);
+
+		if (stored == NULL || reject_unsafe_default(field_name, stored) != RESULT_OK) {
+			Py_XDECREF(stored);
+			Py_DECREF(defaults);
+
+			return NULL;
+		}
+
+		PyTuple_SET_ITEM(defaults, i - first_default, stored);
 	}
 
 	return defaults;
