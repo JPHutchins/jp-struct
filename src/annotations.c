@@ -183,13 +183,40 @@ static void raise_over(PyObject * const displaced, PyObject * const failure) {
 	PyErr_SetRaisedException(py_move(&primary));
 }
 
-/* Both getters hand back a reference, so both are held rather than tested in
- * place. */
+/*
+ * Both getters hand back a reference, so both are held rather than tested in
+ * place -- and between them they still miss a case. `raise ... from None`
+ * stores None as the cause, which PyException_GetCause reports as no cause at
+ * all, so the loudest way the language has of saying "attach nothing" read as
+ * nothing to protect.
+ *
+ * The suppression flag is the only thing that separates it from an exception
+ * that was simply never chained, and there is no C accessor for it. Read
+ * through the attribute protocol, then, on an exception whose class the
+ * annotation author may have written: a failure to look is answered as
+ * suppressed, because attaching nothing is what both that and a real
+ * `from None` want, and the exception about to be raised says more than the one
+ * that could not be looked at.
+ */
 static bool arrived_chained(PyObject * const error) {
 	PY_OWNED(context, PyException_GetContext(error));
 	PY_OWNED(cause, PyException_GetCause(error));
 
-	return context != NULL || cause != NULL;
+	if (context != NULL || cause != NULL) {
+		return true;
+	}
+
+	PyObject * found = NULL;
+
+	if (PyObject_GetOptionalAttrString(error, "__suppress_context__", &found) < 0) {
+		PyErr_Clear();
+
+		return true;
+	}
+
+	PY_OWNED(suppressed, found);
+
+	return suppressed != NULL && Py_IsTrue(suppressed);
 }
 
 /*

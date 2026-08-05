@@ -389,11 +389,15 @@ class TestForwardReferences:
                 y: boom()
                 x: Missing  # noqa: F821
 
-    def test_the_annotations_beside_a_forward_reference_evaluate_twice(self):
+    def test_the_annotations_beside_a_forward_reference_evaluate_again(self):
         """annotationlib rebuilds the callable and re-runs the whole dict, so
-        the siblings of an unresolved name are evaluated a second time. Plain
-        3.14 evaluates once and defers, so this is a divergence, and the count
-        is asserted so that changing it has to be deliberate.
+        the siblings of an unresolved name are evaluated a second time where
+        plain 3.14 evaluates once and defers. That divergence is the claim.
+
+        Not the number: how many times annotationlib re-runs the annotation is
+        its business, which is what
+        `test_a_NameError_from_inside_a_called_function_still_defers` says a few
+        tests up. Asserting 2 here would have made this file hold two policies.
         """
 
         evaluations = []
@@ -408,7 +412,7 @@ class TestForwardReferences:
             b: Missing  # noqa: F821
 
         assert Mixed.__struct_fields__ == ("a", "b")
-        assert len(evaluations) == 2
+        assert len(evaluations) > 1
 
     def test_a_raised_NameError_is_arbitrary_failure_too(self):
         """The exemption is the interpreter's failure to find a name, not the
@@ -499,6 +503,30 @@ def test_a_cause_only_chain_counts_as_a_chain(monkeypatch):
         type(Struct)("Caused", (Struct,), {"__annotate__": annotate})
 
     assert isinstance(raised.value.__cause__, ValueError)
+    assert raised.value.__context__ is None
+
+
+@pytest.mark.skipif(sys.version_info < (3, 14), reason="no escalation before 3.14")
+def test_a_suppressed_chain_counts_as_a_chain_too(monkeypatch):
+    """The mirror of the test above, and the shape neither exception field can
+    see: `from None` stores None as the cause, which reads back as no cause at
+    all. It is the loudest way to ask for nothing to be attached, so the
+    suppression flag is read as well.
+    """
+
+    monkeypatch.setitem(sys.modules, "annotationlib", None)
+
+    def annotate(format):
+        if format == 1:
+            raise NameError("nope", name="Missing") from None
+
+        return {"x": int}
+
+    with pytest.raises(NameError, match="nope") as raised:
+        type(Struct)("Suppressed", (Struct,), {"__annotate__": annotate})
+
+    assert raised.value.__suppress_context__ is True
+    assert raised.value.__cause__ is None
     assert raised.value.__context__ is None
 
 
