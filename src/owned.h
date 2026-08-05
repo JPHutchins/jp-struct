@@ -34,3 +34,23 @@ static inline PyObject * py_move(PyObject * * const reference) {
 
 	return moved;
 }
+
+/*
+ * A reference to the attribute if it is there, and NULL if it is not. NULL with
+ * an exception set is a failure to look, which the caller answers rather than
+ * clears -- a probe that cannot see has not learned that the attribute is
+ * absent.
+ *
+ * Absent is any AttributeError, subclasses included, which is what `hasattr`
+ * and `getattr(x, name, default)` read too: a `__getattr__` raising one is
+ * saying the name is not there, whatever type it says it with.
+ */
+static inline PyObject * optional_attribute(PyObject * const object, char const * const name) {
+	PyObject * const value = PyObject_GetAttrString(object, name);
+
+	if (value == NULL && PyErr_ExceptionMatches(PyExc_AttributeError)) {
+		PyErr_Clear();
+	}
+
+	return value;
+}

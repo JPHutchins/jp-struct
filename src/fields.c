@@ -14,13 +14,22 @@ struct special_form {
 };
 
 /* What the two paths match an annotation against. Built once per class, because
- * the text path's needles are the same two words for every field in it. */
+ * the text path's needles are the same two words for every field in it. Owning
+ * what it holds, so that a needle is written in one place rather than into a
+ * local and then into here. */
 struct form_probes {
 	PyObject * class_var;
 	PyObject * init_var;
 	PyObject * class_var_name;
 	PyObject * init_var_name;
 };
+
+static void form_probes_clear(struct form_probes * const probes) {
+	Py_CLEAR(probes->class_var);
+	Py_CLEAR(probes->init_var);
+	Py_CLEAR(probes->class_var_name);
+	Py_CLEAR(probes->init_var_name);
+}
 
 enum inheritance : int {
 	INHERITANCE_ERROR = -1,
@@ -61,7 +70,6 @@ static struct special_form special_form_of(
 	struct form_probes const * probes
 );
 static struct special_form form_within(PyObject * annotation, struct form_probes const * probes);
-static PyObject * optional_attribute(PyObject * object, char const * name);
 static PyObject * dict_value_ref(PyObject * mapping, PyObject * key);
 static struct special_form named_special_form(PyObject * text, struct form_probes const * probes);
 static bool names_form(PyObject * text, PyObject * needle);
@@ -174,33 +182,19 @@ static enum result append_declared(
 	 * absent and failed both come back NULL, and only the exception tells them
 	 * apart. Failing here has to fail the class rather than quietly leave it
 	 * unguarded. */
-	PY_OWNED(class_var, module_attribute("typing", "ClassVar"));
+	__attribute__((cleanup(form_probes_clear))) struct form_probes probes = {0};
 
-	if (class_var == NULL && PyErr_Occurred()) {
+	probes.class_var = module_attribute("typing", "ClassVar");
+
+	if (probes.class_var == NULL && PyErr_Occurred()) {
 		return RESULT_ERROR;
 	}
 
-	PY_OWNED(init_var, module_attribute("dataclasses", "InitVar"));
+	probes.init_var = module_attribute("dataclasses", "InitVar");
 
-	if (init_var == NULL && PyErr_Occurred()) {
+	if (probes.init_var == NULL && PyErr_Occurred()) {
 		return RESULT_ERROR;
 	}
-
-	/* From the same two strings the refusal quotes, so there is one spelling of
-	 * each form in the file. Built at the first text annotation rather than in
-	 * the matcher, which runs per field and per form, and not up front, which
-	 * taxes every class whose annotations are all objects.
-	 *
-	 * At the first one and not from a question asked of the dict beforehand:
-	 * the walk runs the class author's `__getattr__`, which can put a str into
-	 * this dict after such a question has answered "no text here". That is
-	 * exactly what happened -- the answer was cached, the needles stayed NULL,
-	 * and the injected str reached PyUnicode_GET_LENGTH(NULL). Deciding where
-	 * the value is used cannot go stale between the decision and the use. */
-	PY_MOVABLE(class_var_name, NULL);
-	PY_MOVABLE(init_var_name, NULL);
-
-	struct form_probes probes = {.class_var = class_var, .init_var = init_var};
 
 	/* The names are taken first, because the object path asks the annotation
 	 * for `__origin__` and `__args__` and that runs the class author's code --
@@ -229,16 +223,25 @@ static enum result append_declared(
 			continue;
 		}
 
+		/* From the same two strings the refusal quotes, so there is one spelling
+		 * of each form in the file. Built at the first text annotation rather
+		 * than in the matcher, which runs per field and per form, and not up
+		 * front, which taxes every class whose annotations are all objects.
+		 *
+		 * At the first one and not from a question asked of the dict beforehand:
+		 * the walk runs the class author's `__getattr__`, which can put a str
+		 * into this dict after such a question has answered "no text here". That
+		 * is exactly what happened -- the answer was cached, the needles stayed
+		 * NULL, and the injected str reached PyUnicode_GET_LENGTH(NULL).
+		 * Deciding where the value is used cannot go stale between the decision
+		 * and the use. */
 		if (PyUnicode_Check(annotation) && probes.class_var_name == NULL) {
-			class_var_name = PyUnicode_FromString(CLASS_VAR_FORM.name);
-			init_var_name = PyUnicode_FromString(INIT_VAR_FORM.name);
+			probes.class_var_name = PyUnicode_FromString(CLASS_VAR_FORM.name);
+			probes.init_var_name = PyUnicode_FromString(INIT_VAR_FORM.name);
 
-			if (class_var_name == NULL || init_var_name == NULL) {
+			if (probes.class_var_name == NULL || probes.init_var_name == NULL) {
 				return RESULT_ERROR;
 			}
-
-			probes.class_var_name = class_var_name;
-			probes.init_var_name = init_var_name;
 		}
 
 		if (!PyUnicode_CheckExact(field_name)) {
@@ -512,19 +515,6 @@ static PyObject * dict_value_ref(PyObject * const mapping, PyObject * const key)
 #else
 	return Py_XNewRef(PyDict_GetItem(mapping, key));
 #endif
-}
-
-/* The attribute if it is there, and NULL if it is not. NULL with an exception
- * set is a failure to look, which the caller propagates rather than clears --
- * a guard that cannot see is not a guard that says "ordinary field". */
-static PyObject * optional_attribute(PyObject * const object, char const * const name) {
-	PyObject * const value = PyObject_GetAttrString(object, name);
-
-	if (value == NULL && PyErr_ExceptionMatches(PyExc_AttributeError)) {
-		PyErr_Clear();
-	}
-
-	return value;
 }
 
 /*
