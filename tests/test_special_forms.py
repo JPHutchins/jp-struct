@@ -289,6 +289,66 @@ def test_a_bare_form_inside_annotated_is_refused_on_the_object_path(form):
 
 
 @pytest.mark.parametrize(
+    "annotation",
+    [
+        Annotated[ClassVar[int], "m"] | None,
+        list[ClassVar[int]],
+        dict[str, ClassVar[int]],
+        tuple[ClassVar[int]],
+        list[InitVar[int]],
+    ],
+    ids=["optional-annotated", "list", "dict-value", "tuple", "list-initvar"],
+)
+def test_a_form_kept_in_the_arguments_is_refused(annotation):
+    """#57's ruling: the walk reads `__args__` as well as `__origin__`, because
+    a subscript keeps the form where a chain walk never looked. Every one of
+    these was a field on the object path while the text path refused the same
+    source, which is #14 on the path almost every class takes.
+    """
+
+    with pytest.raises(TypeError, match="salix does not support"):
+        type(Struct)("Nested", (Struct,), {"__annotations__": {"v": annotation}})
+
+
+@pytest.mark.parametrize(
+    "annotation",
+    [int, list[int], dict[str, int], int | None, Annotated[int, "meta"], tuple[int, str]],
+    ids=["plain", "list", "dict", "optional", "annotated", "tuple"],
+)
+def test_walking_the_arguments_does_not_widen_what_counts_as_a_form(annotation):
+    """The other direction of the same change: reading `__args__` visits more
+    objects, and none of them may start answering yes.
+    """
+
+    Ordinary = type(Struct)("Ordinary", (Struct,), {"__annotations__": {"v": annotation}})
+
+    assert Ordinary.__struct_fields__ == ("v",)
+
+
+@pytest.mark.skipif(
+    sys.version_info < (3, 11),
+    reason="typing refuses a bare special form as an Annotated argument before 3.11",
+)
+def test_the_form_as_annotated_metadata_is_still_a_field_on_the_object_path():
+    """`Annotated` keeps its metadata in `__metadata__`, not in `__args__`:
+
+        Annotated[int, ClassVar].__args__      (<class 'int'>,)
+        Annotated[int, ClassVar].__metadata__  (typing.ClassVar,)
+
+    So walking the arguments does not reach it, and the cost #57 predicted for
+    option 1 -- that the object path would adopt the text path's refusal of
+    this shape -- is not a cost it has. The two paths still disagree here, and
+    that disagreement is #57's, not this walk's.
+    """
+
+    Metadata = type(Struct)(
+        "Metadata", (Struct,), {"__annotations__": {"v": Annotated[int, ClassVar]}}
+    )
+
+    assert Metadata.__struct_fields__ == ("v",)
+
+
+@pytest.mark.parametrize(
     "trailing",
     ["́", "·", "‌", "‍", "々", "s", "_", "1", " ", "[", "€"],
     ids=["acute", "middot", "zwnj", "zwj", "iteration-mark", "letter", "underscore",

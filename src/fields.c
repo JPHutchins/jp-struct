@@ -60,6 +60,8 @@ static struct special_form special_form_of(
 	PyObject * annotation,
 	struct form_probes const * probes
 );
+static struct special_form form_within(PyObject * annotation, struct form_probes const * probes);
+static PyObject * optional_attribute(PyObject * object, char const * name);
 static struct special_form named_special_form(PyObject * text, struct form_probes const * probes);
 static bool annotates_with_text(PyObject * annotations);
 static bool names_form(PyObject * text, PyObject * needle);
@@ -305,8 +307,58 @@ static enum inheritance inherits_field(StructType const * const base, PyObject *
  * cannot spin here.
  */
 enum : int {
-	SPECIAL_FORM_HOPS = 4,
+	/* A budget on work rather than on depth. The walk is a tree since #57's
+	 * ruling, and bounding the shape no longer bounds the effort: four hops was
+	 * enough for a chain -- Optional[Annotated[ClassVar[int], 'm']] is four --
+	 * and this is enough for the arguments beside them, while a
+	 * self-referential __origin__ still costs a fixed amount. */
+	SPECIAL_FORM_NODES = 32,
 };
+
+/*
+ * Owned, every one of them. __origin__ hands back a new reference, and an
+ * argument outlives the tuple it was read from only because this holds it.
+ *
+ * A fixed array rather than a list, because the frontier is bounded anyway and
+ * an allocation here would be one per subscripted annotation per class -- the
+ * cost the needles were just moved out of the matcher to avoid.
+ */
+struct form_frontier {
+	PyObject * nodes[SPECIAL_FORM_NODES];
+	int count;
+};
+
+static void form_frontier_clear(struct form_frontier * const frontier) {
+	while (frontier->count > 0) {
+		Py_DECREF(frontier->nodes[--frontier->count]);
+	}
+}
+
+/* Full is not a failure: the budget is the point, and a walk that runs out
+ * answers "no form", which is what an unrecognised annotation answers. */
+static void form_frontier_push(struct form_frontier * const frontier, PyObject * const node) {
+	if (frontier->count < SPECIAL_FORM_NODES) {
+		frontier->nodes[frontier->count++] = Py_NewRef(node);
+	}
+}
+
+static struct special_form form_named_by(
+	PyObject * const annotation,
+	struct form_probes const * const probes
+) {
+	if (probes->class_var != NULL && annotation == probes->class_var) {
+		return CLASS_VAR_FORM;
+	}
+
+	if (
+		probes->init_var != NULL &&
+		(annotation == probes->init_var || (PyObject *) Py_TYPE(annotation) == probes->init_var)
+	) {
+		return INIT_VAR_FORM;
+	}
+
+	return (struct special_form){0};
+}
 
 static struct special_form special_form_of(
 	PyObject * const annotation,
@@ -316,58 +368,93 @@ static struct special_form special_form_of(
 		return named_special_form(annotation, probes);
 	}
 
-	PyObject * const class_var = probes->class_var;
-	PyObject * const init_var = probes->init_var;
-
 	/* Neither module is loaded, so nothing reachable from here can be either
-	 * form and the walk below can only ask __origin__ of things for nothing. */
-	if (class_var == NULL && init_var == NULL) {
+	 * form and the walk below can only ask attributes of things for nothing. */
+	if (probes->class_var == NULL && probes->init_var == NULL) {
 		return (struct special_form){0};
 	}
 
-	PyObject * current = annotation;
+	return form_within(annotation, probes);
+}
 
-	PY_MOVABLE(held, NULL);
+/*
+ * The form can be anywhere in a subscripted annotation, not only at the end of
+ * the __origin__ chain. `Optional[Annotated[ClassVar[int], 'm']]` keeps it in
+ * the arguments, where a chain walk never looks, so it became a field while
+ * the text path refused the same source -- #14 again, on the path almost every
+ * class takes. Both are walked now, per #57's ruling.
+ *
+ * It also makes the object path refuse `Annotated[int, ClassVar]`, where the
+ * form is metadata rather than the type. That is not a new refusal: the text
+ * path already refuses it and ships that way, and one answer is worth more
+ * than two that disagree.
+ *
+ * A str inside __args__ is walked, not matched -- `Annotated[int, "ClassVar"]`
+ * is a string in a metadata slot, and the text matcher is for an annotation
+ * that reached salix as source, not for anything that looks like one.
+ *
+ * A queue rather than a recursion, because clang-tidy's misc-no-recursion is an
+ * error here and the shape does not need one: the frontier is what bounds the
+ * walk, so neither a self-referential __origin__ nor an __args__ holding its
+ * own owner can spin.
+ */
+static struct special_form form_within(
+	PyObject * const annotation,
+	struct form_probes const * const probes
+) {
+	__attribute__((cleanup(form_frontier_clear))) struct form_frontier frontier = {0};
 
-	for (int hop = 0; hop < SPECIAL_FORM_HOPS; ++hop) {
-		if (class_var != NULL && current == class_var) {
-			return CLASS_VAR_FORM;
+	form_frontier_push(&frontier, annotation);
+
+	for (int at = 0; at < frontier.count; ++at) {
+		PyObject * const current = frontier.nodes[at];
+		struct special_form const named = form_named_by(current, probes);
+
+		if (named.name != NULL) {
+			return named;
 		}
 
-		if (
-			init_var != NULL &&
-			(current == init_var || (PyObject *) Py_TYPE(current) == init_var)
-		) {
-			return INIT_VAR_FORM;
-		}
-
-		/* A plain class is the common annotation and has no __origin__; asking
-		 * anyway costs an AttributeError raised and cleared per field. */
+		/* A plain class is the common annotation and has neither attribute;
+		 * asking anyway costs two AttributeErrors raised and cleared. */
 		if (PyType_Check(current)) {
-			break;
+			continue;
 		}
 
-		PyObject * const next = PyObject_GetAttrString(current, "__origin__");
+		PY_OWNED(origin, optional_attribute(current, "__origin__"));
 
-		if (next == NULL) {
-			/* Not having one is the ordinary answer and ends the walk. Anything
-			 * else is a failure to look, and the caller checks for it -- the
-			 * last place in this file that used to clear what it did not
-			 * expect. */
-			if (!PyErr_ExceptionMatches(PyExc_AttributeError)) {
-				break;
-			}
-
-			PyErr_Clear();
-
-			break;
+		if (origin != NULL) {
+			form_frontier_push(&frontier, origin);
 		}
 
-		Py_XSETREF(held, next);
-		current = held;
+		PY_OWNED(arguments, PyErr_Occurred() ? NULL : optional_attribute(current, "__args__"));
+
+		if (PyErr_Occurred()) {
+			return (struct special_form){0};
+		}
+
+		for (
+			Py_ssize_t i = 0;
+			arguments != NULL && PyTuple_Check(arguments) && i < PyTuple_GET_SIZE(arguments);
+			++i
+		) {
+			form_frontier_push(&frontier, PyTuple_GET_ITEM(arguments, i));
+		}
 	}
 
 	return (struct special_form){0};
+}
+
+/* The attribute if it is there, and NULL if it is not. NULL with an exception
+ * set is a failure to look, which the caller propagates rather than clears --
+ * a guard that cannot see is not a guard that says "ordinary field". */
+static PyObject * optional_attribute(PyObject * const object, char const * const name) {
+	PyObject * const value = PyObject_GetAttrString(object, name);
+
+	if (value == NULL && PyErr_ExceptionMatches(PyExc_AttributeError)) {
+		PyErr_Clear();
+	}
+
+	return value;
 }
 
 /*
