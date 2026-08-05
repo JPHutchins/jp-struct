@@ -13,6 +13,17 @@ import pytest
 from salix import Struct
 
 
+def boom():
+    """An annotation that fails for its own reasons, wearing a NameError.
+
+    Shared by the two tests that read the exemption's boundary from opposite
+    sides, so that moving the boundary cannot leave one of them agreeing with
+    the old answer.
+    """
+
+    raise NameError("boom")
+
+
 def test_a_hand_written_annotate_is_called_directly():
     """The only path an interpreter without PEP 649 has: no __annotations__ in
     the namespace, and an __annotate__ the class body wrote itself. Outside the
@@ -179,6 +190,63 @@ class TestANonFunctionAnnotate:
         with pytest.raises(NotImplementedError):
             type(Struct)("Inverted", (Struct,), {"__annotate__": inverted})
 
+    def test_a_VALUE_failure_of_any_other_kind_is_not_rescued_either(self):
+        """NotImplementedError is one of the shapes the removed flow retried,
+        not the shape. The gate is three conditions -- a plain function, a
+        NameError, a non-empty `.name` -- so anything failing VALUE for any
+        other reason now propagates even where the other arm would have
+        answered.
+        """
+
+        def refuses(format):
+            if format == 1:
+                raise ValueError("boom")
+
+            return {"x": int}
+
+        with pytest.raises(ValueError, match="boom"):
+            type(Struct)("Refuses", (Struct,), {"__annotate__": refuses})
+
+    @pytest.mark.skipif(
+        sys.version_info < (3, 14),
+        reason="the discriminator this pins is compiled out before 3.14",
+    )
+    def test_a_hand_written_empty_name_is_not_a_forward_reference_either(self):
+        """The generated-annotate half is
+        `test_an_empty_name_is_not_a_forward_reference`. This is the shape where
+        the escalation would have answered, so the narrowing is the only thing
+        stopping it and deleting the length check makes this build.
+        """
+
+        def forged(format):
+            if format == 1:
+                raise NameError(name="")
+
+            return {"x": int}
+
+        with pytest.raises(NameError):
+            type(Struct)("Forged", (Struct,), {"__annotate__": forged})
+
+    @pytest.mark.skipif(
+        sys.version_info < (3, 14),
+        reason="the escalation this describes is compiled out before 3.14",
+    )
+    def test_an_escalation_that_answers_with_a_non_dict_loses_the_name(self):
+        """FORWARDREF's answer is handed back unchecked, so a non-dict is
+        refused downstream by the `__annotations__` check and the name that
+        started the rescue is gone from the message. The cost of not validating
+        here, pinned rather than left to be found.
+        """
+
+        def answers_a_list(format):
+            if format == 1:
+                raise NameError("nope", name="Missing")
+
+            return ["x"]
+
+        with pytest.raises(TypeError, match="__annotations__ must be a dict"):
+            type(Struct)("Listed", (Struct,), {"__annotate__": answers_a_list})
+
     def test_a_partial_is_accepted_when_its_names_resolve(self):
         def annotate(format):
             return {"z": int}
@@ -309,9 +377,6 @@ class TestForwardReferences:
         back the whole dict or nothing.
         """
 
-        def boom():
-            raise NameError("boom")
-
         class Rescued(Struct):
             x: Missing  # noqa: F821
             y: boom()
@@ -324,13 +389,31 @@ class TestForwardReferences:
                 y: boom()
                 x: Missing  # noqa: F821
 
+    def test_the_annotations_beside_a_forward_reference_evaluate_twice(self):
+        """annotationlib rebuilds the callable and re-runs the whole dict, so
+        the siblings of an unresolved name are evaluated a second time. Plain
+        3.14 evaluates once and defers, so this is a divergence, and the count
+        is asserted so that changing it has to be deliberate.
+        """
+
+        evaluations = []
+
+        def counted():
+            evaluations.append(1)
+
+            return int
+
+        class Mixed(Struct):
+            a: counted()
+            b: Missing  # noqa: F821
+
+        assert Mixed.__struct_fields__ == ("a", "b")
+        assert len(evaluations) == 2
+
     def test_a_raised_NameError_is_arbitrary_failure_too(self):
         """The exemption is the interpreter's failure to find a name, not the
         exception type it uses to say so.
         """
-
-        def boom():
-            raise NameError("boom")
 
         with pytest.raises(NameError, match="boom"):
 
@@ -366,11 +449,23 @@ class TestForwardReferences:
 @pytest.mark.skipif(sys.version_info < (3, 14), reason="no escalation before 3.14")
 def test_a_pre_existing_context_is_left_alone(monkeypatch):
     """The rescue's own failure is attached only where the NameError arrived
-    without a chain. Held rather than tested in place, because
-    PyException_GetContext hands back a reference.
+    without a chain.
+
+    A stand-in for annotationlib records the call, because the ValueError this
+    checks for is put there by the enclosing `except` block and would be there
+    in a world where no rescue ran at all.
     """
 
-    monkeypatch.setitem(sys.modules, "annotationlib", None)
+    formats = []
+
+    class Recording:
+        @staticmethod
+        def call_annotate_function(annotate, format):
+            formats.append(format)
+
+            raise ModuleNotFoundError("no annotationlib")
+
+    monkeypatch.setitem(sys.modules, "annotationlib", Recording)
 
     try:
         raise ValueError("earlier")
@@ -380,7 +475,31 @@ def test_a_pre_existing_context_is_left_alone(monkeypatch):
             class Chained(Struct):
                 x: Missing  # noqa: F821
 
+    assert formats == [3]
     assert isinstance(raised.value.__context__, ValueError)
+    assert raised.value.__context__.__context__ is None
+
+
+@pytest.mark.skipif(sys.version_info < (3, 14), reason="no escalation before 3.14")
+def test_a_cause_only_chain_counts_as_a_chain(monkeypatch):
+    """`raise ... from` leaves `__context__` empty, so reading only that field
+    would append the rescue's failure beside a cause the raising code chose.
+    Both fields are read, and neither is written over.
+    """
+
+    monkeypatch.setitem(sys.modules, "annotationlib", None)
+
+    def annotate(format):
+        if format == 1:
+            raise NameError("nope", name="Missing") from ValueError("the cause")
+
+        return {"x": int}
+
+    with pytest.raises(NameError, match="nope") as raised:
+        type(Struct)("Caused", (Struct,), {"__annotate__": annotate})
+
+    assert isinstance(raised.value.__cause__, ValueError)
+    assert raised.value.__context__ is None
 
 
 @pytest.mark.skipif(sys.version_info < (3, 14), reason="no escalation before 3.14")
@@ -396,5 +515,75 @@ def test_an_interrupt_during_the_rescue_is_not_demoted_to_context():
 
         raise KeyboardInterrupt
 
-    with pytest.raises(KeyboardInterrupt):
+    with pytest.raises(KeyboardInterrupt) as raised:
         type(Struct)("Interrupted", (Struct,), {"__annotate__": annotate})
+
+    assert isinstance(raised.value.__context__, NameError)
+
+
+@pytest.mark.skipif(sys.version_info < (3, 14), reason="no escalation before 3.14")
+def test_an_interrupt_that_arrives_chained_keeps_the_chain_it_came_with():
+    """The other half of the same rule, and the half where the name is lost: an
+    exit raised from inside an `except` block already carries a chain, and the
+    displaced NameError is dropped rather than put somewhere it would displace
+    what the exit came with.
+    """
+
+    def annotate(format):
+        if format == 1:
+            raise NameError(name="Missing")
+
+        try:
+            raise ValueError("earlier")
+        except ValueError:
+            raise KeyboardInterrupt  # noqa: B904 -- the shape under test
+
+    with pytest.raises(KeyboardInterrupt) as raised:
+        type(Struct)("Interrupted", (Struct,), {"__annotate__": annotate})
+
+    assert isinstance(raised.value.__context__, ValueError)
+    assert raised.value.__context__.__context__ is None
+
+
+@pytest.mark.skipif(
+    sys.version_info < (3, 14),
+    reason="the discriminator this drives is compiled out before 3.14",
+)
+class TestAHostileNameAttribute:
+    """Reading `.name` runs the attribute protocol on an exception whose class
+    the annotation author wrote, so looking can raise. What it raises gets the
+    same rule as a rescue failure rather than one of its own.
+    """
+
+    @staticmethod
+    def raising(error):
+        def annotate(format):
+            raise error
+
+        return annotate
+
+    def test_an_exit_from_the_lookup_wins(self):
+        class Hostile(NameError):
+            def __getattribute__(self, attribute):
+                if attribute == "name":
+                    raise KeyboardInterrupt
+
+                return super().__getattribute__(attribute)
+
+        with pytest.raises(KeyboardInterrupt) as raised:
+            type(Struct)("H", (Struct,), {"__annotate__": self.raising(Hostile("x"))})
+
+        assert isinstance(raised.value.__context__, Hostile)
+
+    def test_an_ordinary_failure_from_the_lookup_loses(self):
+        class Hostile(NameError):
+            def __getattribute__(self, attribute):
+                if attribute == "name":
+                    raise RuntimeError("looking hurt")
+
+                return super().__getattribute__(attribute)
+
+        with pytest.raises(Hostile) as raised:
+            type(Struct)("H", (Struct,), {"__annotate__": self.raising(Hostile("x"))})
+
+        assert isinstance(raised.value.__context__, RuntimeError)

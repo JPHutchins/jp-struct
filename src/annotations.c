@@ -16,7 +16,17 @@ static PyObject * borrow_annotate(PyObject * namespace);
 static PyObject * evaluate(PyObject * annotate);
 
 #if PY_VERSION_HEX >= 0x030E0000
-static bool names_an_unresolved_symbol(PyObject * error);
+/* What a NameError's `.name` says about why it was raised. */
+enum symbol_verdict {
+	SYMBOL_UNRESOLVED,
+	SYMBOL_NOT_A_SYMBOL,
+	SYMBOL_UNREADABLE,
+};
+
+static enum symbol_verdict names_an_unresolved_symbol(PyObject * error);
+static PyObject * escalate(PyObject * annotate);
+static void raise_over(PyObject * displaced, PyObject * failure);
+static bool arrived_chained(PyObject * error);
 #endif
 
 PyObject * struct_annotations(PyObject * const namespace) {
@@ -71,22 +81,10 @@ static PyObject * borrow_annotate(PyObject * const namespace) {
  * None of this exists below 3.14. annotationlib is stdlib only from there, and
  * so is PEP 649, so an __annotate__ in the namespace is one the class body
  * wrote and VALUE is the whole story.
- *
- * The import is a plain path-based one and could in principle find a user
- * module of that name; a checkout that shadows a stdlib module has larger
- * problems. Whichever half of the escalation fails, the NameError it displaced
- * is put back as the raised one -- with that failure behind it as __context__
- * where there was no chain already, and untouched where there was, since the
- * chain it arrived with says more than the rescue's own failure does.
  */
 static PyObject * evaluate(PyObject * const annotate) {
 	PY_OWNED(format, PyLong_FromLong(ANNOTATION_FORMAT_VALUE));
-
-	if (format == NULL) {
-		return NULL;
-	}
-
-	PY_MOVABLE(resolved, PyObject_CallOneArg(annotate, format));
+	PY_MOVABLE(resolved, format != NULL ? PyObject_CallOneArg(annotate, format) : NULL);
 
 #if PY_VERSION_HEX >= 0x030E0000
 	/* Only a plain function: annotationlib's FORWARDREF path rebuilds the
@@ -98,65 +96,33 @@ static PyObject * evaluate(PyObject * const annotate) {
 	if (resolved == NULL && PyFunction_Check(annotate) && PyErr_ExceptionMatches(PyExc_NameError)) {
 		PY_MOVABLE(unresolved, PyErr_GetRaisedException());
 
-		if (names_an_unresolved_symbol(unresolved)) {
-			/* No `owner`: the class does not exist yet, so annotationlib builds
-			 * every ForwardRef unowned and class-scope resolution is off the
-			 * table. Only the keys are read here, so nothing depends on it. */
-			PY_OWNED(annotationlib, PyImport_ImportModule("annotationlib"));
-			PY_MOVABLE(
-				escalated,
-				annotationlib == NULL ? NULL :
-					PyObject_CallMethod(
-						annotationlib,
-						"call_annotate_function",
-						"Oi",
-						annotate,
-						ANNOTATION_FORMAT_FORWARDREF
-					)
-			);
+		switch (names_an_unresolved_symbol(unresolved)) {
+			case SYMBOL_UNRESOLVED: {
+				PY_MOVABLE(escalated, escalate(annotate));
 
-			if (escalated != NULL) {
-				return py_move(&escalated);
-			}
-
-			/* Either half can fail, and both bury the same thing. A second bad
-			 * annotation makes the re-evaluation raise for its own reasons, and
-			 * that error says nothing about the name this started with. */
-			PY_MOVABLE(failure, PyErr_GetRaisedException());
-
-			/* An exit is not a diagnostic. Demoting KeyboardInterrupt to the
-			 * NameError's __context__ would swallow the interrupt and report a
-			 * name instead. */
-			if (failure != NULL && !PyErr_GivenExceptionMatches(failure, PyExc_Exception)) {
-				/* The exit wins, but the name still says which annotation the
-				 * rescue was for, so it goes behind rather than nowhere. Held,
-				 * not tested in place: GetContext hands back a reference. */
-				PY_OWNED(already, PyException_GetContext(failure));
-
-				if (already == NULL) {
-					PyException_SetContext(failure, py_move(&unresolved));
+				if (escalated != NULL) {
+					return py_move(&escalated);
 				}
 
-				PyErr_SetRaisedException(py_move(&failure));
+				/* Either half of the rescue can fail, and both bury the same
+				 * thing. A second bad annotation makes the re-evaluation raise
+				 * for its own reasons, and that error says nothing about the
+				 * name this started with. */
+				raise_over(py_move(&unresolved), PyErr_GetRaisedException());
 
 				return NULL;
 			}
 
-			/* Only where there is nothing to lose. A NameError raised while
-			 * another exception was being handled arrives with a chain, and
-			 * that chain says more about the class than this failure does.
-			 * GetContext hands back a reference, so it is held rather than
-			 * tested in place. */
-			PY_OWNED(chained, PyException_GetContext(unresolved));
+			case SYMBOL_UNREADABLE:
+				raise_over(py_move(&unresolved), PyErr_GetRaisedException());
 
-			if (chained == NULL) {
-				PyException_SetContext(unresolved, py_move(&failure));
-			}
+				return NULL;
+
+			case SYMBOL_NOT_A_SYMBOL:
+				PyErr_SetRaisedException(py_move(&unresolved));
+
+				return NULL;
 		}
-
-		PyErr_SetRaisedException(py_move(&unresolved));
-
-		return NULL;
 	}
 #endif
 
@@ -164,6 +130,68 @@ static PyObject * evaluate(PyObject * const annotate) {
 }
 
 #if PY_VERSION_HEX >= 0x030E0000
+/* The import is a plain path-based one and could in principle find a user
+ * module of that name; a checkout that shadows a stdlib module has larger
+ * problems.
+ *
+ * No `owner`: the class does not exist yet, so annotationlib builds every
+ * ForwardRef unowned and class-scope resolution is off the table. Only the keys
+ * are read here, so nothing depends on it. */
+static PyObject * escalate(PyObject * const annotate) {
+	PY_OWNED(annotationlib, PyImport_ImportModule("annotationlib"));
+
+	return (
+		annotationlib == NULL ? NULL :
+		PyObject_CallMethod(
+			annotationlib,
+			"call_annotate_function",
+			"Oi",
+			annotate,
+			ANNOTATION_FORMAT_FORWARDREF
+		)
+	);
+}
+
+/*
+ * One rule for every way the rescue can fail, because writing it out at each
+ * failure in turn is what leaked a reference twice.
+ *
+ * An exit is not a diagnostic: a failure that is not an `Exception` wins over
+ * the name it displaced, and one that is loses to it. That is broader than the
+ * KeyboardInterrupt and SystemExit it is for -- a GeneratorExit or a
+ * BaseException subclass of the annotation's own wins too -- and it is the line
+ * Python already draws for what `except Exception` may swallow.
+ *
+ * The loser goes behind the winner as __context__ only where the winner arrived
+ * with no chain of its own, __cause__ counting as much as __context__: a chain
+ * the class already had says more than either of these does. Where there is
+ * one, the loser is dropped.
+ *
+ * Both arguments are owned, and neither is NULL: every caller takes its
+ * `failure` from PyErr_GetRaisedException straight after a call that returned
+ * NULL, and CPython sets an exception on every one of those.
+ */
+static void raise_over(PyObject * const displaced, PyObject * const failure) {
+	bool const exits = !PyErr_GivenExceptionMatches(failure, PyExc_Exception);
+	PY_MOVABLE(primary, exits ? failure : displaced);
+	PY_MOVABLE(behind, exits ? displaced : failure);
+
+	if (!arrived_chained(primary)) {
+		PyException_SetContext(primary, py_move(&behind));
+	}
+
+	PyErr_SetRaisedException(py_move(&primary));
+}
+
+/* Both getters hand back a reference, so both are held rather than tested in
+ * place. */
+static bool arrived_chained(PyObject * const error) {
+	PY_OWNED(context, PyException_GetContext(error));
+	PY_OWNED(cause, PyException_GetCause(error));
+
+	return context != NULL || cause != NULL;
+}
+
 /*
  * Not resolving a name is the exemption; arbitrary failure is not, and a
  * NameError the annotation raised for its own reasons is arbitrary failure
@@ -177,29 +205,27 @@ static PyObject * evaluate(PyObject * const annotate) {
  * re-evaluates the whole dict and stringifies what it cannot resolve. The
  * exemption is best-effort against accidents, not a wall against a caller who
  * wants past it.
+ *
+ * The lookup runs the attribute protocol on an exception whose class the
+ * annotation author controls, so it is a third answer rather than a false one:
+ * a failure to look is not "no name", and the caller decides what to raise.
  */
-static bool names_an_unresolved_symbol(PyObject * const error) {
+static enum symbol_verdict names_an_unresolved_symbol(PyObject * const error) {
 	PyObject * found = NULL;
 
-	/* A failure to look is not "no name": the caller re-raises the NameError,
-	 * which would clear this. Chained onto it instead, so it survives -- and
-	 * only where there is no chain already, the same rule the escalation's own
-	 * failure follows. */
 	if (PyObject_GetOptionalAttrString(error, "name", &found) < 0) {
-		PY_MOVABLE(failure, PyErr_GetRaisedException());
-		PY_OWNED(chained, PyException_GetContext(error));
-
-		if (chained == NULL) {
-			PyException_SetContext(error, py_move(&failure));
-		}
-
-		return false;
+		return SYMBOL_UNREADABLE;
 	}
 
 	PY_OWNED(name, found);
 
 	/* The interpreter sets a real symbol, so a non-str or an empty one is
 	 * something the raising code put there. */
-	return name != NULL && PyUnicode_Check(name) && PyUnicode_GET_LENGTH(name) > 0;
+	return (
+		name != NULL && PyUnicode_Check(
+			name
+		) && PyUnicode_GET_LENGTH(name) > 0 ? SYMBOL_UNRESOLVED :
+		SYMBOL_NOT_A_SYMBOL
+	);
 }
 #endif
