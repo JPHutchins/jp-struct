@@ -63,6 +63,45 @@ class TestAMixinSubclass:
         with pytest.raises(TypeError, match="unhashable type: 'Impostor'"):
             hash(impostor)
 
+    def test_equality_between_two_of_them_is_intransitive(self):
+        """A consequence of the fallback policy rather than a decision of its
+        own, and #66's fix does not change it: `rich_compare` answers
+        NotImplemented for a non-struct, so two content-equal impostors fall
+        back to identity, while each compares equal to the plain value they
+        wrap through the co-base's reflected `__eq__`.
+        """
+
+        pair = type("Tupleish", (MIXIN, tuple), {"__slots__": ()})
+        left, right = pair((1, 2)), pair((1, 2))
+
+        assert left == (1, 2)
+        assert right == (1, 2)
+        assert left != right
+
+    def test_the_co_base_setter_is_overridden_rather_than_deferred_to(self):
+        """Setattr falls back to object's, which for a co-base that defines its
+        own `__setattr__` means overriding it rather than falling back: the
+        write lands and the co-base never sees it. Same trade as repr, stated
+        here because the comment in mixin.c is the only other place it exists.
+        """
+
+        seen = []
+
+        class Recording(list):
+            def __setattr__(self, name, value):
+                seen.append(name)
+                object.__setattr__(self, name, value)
+
+        impostor = type("Sub", (MIXIN, Recording), {"__slots__": ("z",)})()
+        impostor.z = 1
+
+        assert impostor.z == 1
+        assert seen == []
+
+        Recording().z = 1
+
+        assert seen == ["z"]
+
     def test_it_cannot_be_equal_to_something_it_hashes_differently_from(self):
         """The contract the fallback used to break, over a co-base that is
         itself a value type: `==` said yes and the dict said no.
@@ -131,6 +170,14 @@ class TestTheMetaclassWithoutTheMixin:
         assert built(1, 2) == built(1, 2)
 
 
+def metaclass_subclass_that_builds_with_type_new():
+    class Substituting(META):
+        def __new__(mcls, *args, **keywords):
+            return type.__new__(mcls, *args, **keywords)
+
+    return Substituting
+
+
 class TestTheUninstalledClassCannotBeBuilt:
     """`is_struct` asks the metaclass, so every instance of it has to have
     a field table. What guarantees it is CPython's own `tp_new_wrapper`: the
@@ -144,34 +191,31 @@ class TestTheUninstalledClassCannotBeBuilt:
     of those slots reads holds.
     """
 
-    @staticmethod
-    def metaclass_subclass_that_builds_with_type_new():
-        class Substituting(META):
-            def __new__(mcls, *args, **keywords):
-                return type.__new__(mcls, *args, **keywords)
-
-        return Substituting
-
-    def test_type_new_refuses_the_metaclass(self):
-        with pytest.raises(TypeError, match="is not safe"):
-            type.__new__(META, "S", (Point,), {})
-
-    def test_type_new_refuses_a_metaclass_subclass(self):
-        class Inheriting(META):
-            pass
-
-        with pytest.raises(TypeError, match="is not safe"):
-            type.__new__(Inheriting, "S", (Point,), {})
-
-    def test_a_metaclass_new_that_reaches_for_type_new_is_refused_too(self):
-        """The substitution route into the same hole: the refusal follows the
-        metatype rather than the call site.
+    @pytest.mark.parametrize(
+        "metatype",
+        [
+            pytest.param(lambda: META, id="the-metaclass"),
+            pytest.param(lambda: type("Inheriting", (META,), {}), id="a-plain-subclass"),
+            pytest.param(
+                metaclass_subclass_that_builds_with_type_new,
+                id="one-that-substitutes-type-new",
+            ),
+        ],
+    )
+    def test_type_new_refuses_every_route_to_the_metatype(self, metatype):
+        """One assertion, three ways in: the refusal follows the metatype rather
+        than the call site.
         """
 
-        Substituting = self.metaclass_subclass_that_builds_with_type_new()
-
         with pytest.raises(TypeError, match="is not safe"):
-            type.__new__(Substituting, "S", (Point,), {})
+            type.__new__(metatype(), "S", (Point,), {})
+
+    def test_the_substituting_new_is_refused_through_its_own_call_too(self):
+        """The route the parametrization above cannot express: not
+        `type.__new__` directly, but the metaclass call that reaches it.
+        """
+
+        Substituting = metaclass_subclass_that_builds_with_type_new()
 
         with pytest.raises(TypeError, match="is not safe"):
             Substituting("S", (Point,), {})

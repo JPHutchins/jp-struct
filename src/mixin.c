@@ -55,6 +55,22 @@ static PyGetSetDef Struct_getset[] = {
  * hashing and equality have to agree and equality here is the co-base's. It
  * refuses instead. See src/hash.c.
  *
+ * Setattr takes object's too, and that one is worth saying out loud because it
+ * *overrides* rather than falls back: a co-base with its own `__setattr__`
+ * never sees the write. Measured, over a `list` subclass that records every
+ * name set on it -- the co-base alone records `['z']`, the impostor records
+ * nothing and the value lands anyway. Same reason as repr: honouring it means
+ * walking the MRO for a setter to borrow, on a path reachable only by
+ * subclassing a private class.
+ *
+ * Equality is left intransitive by all of this, and #66's fix does not change
+ * it. `rich_compare` answers NotImplemented for a non-struct, so two
+ * content-equal impostors fall back to identity and compare unequal, while each
+ * compares equal to the plain value they wrap through the co-base's reflected
+ * `__eq__`. Pinned in tests/test_struct_identity.py rather than left to be
+ * discovered, because it is a consequence of the fallback policy and not a
+ * separate decision.
+ *
  * The two getsets are the exception either way: they report struct metadata and
  * nothing else, so there is nothing to fall back to and they raise. An
  * AttributeError rather than a TypeError, because "this object does not have
