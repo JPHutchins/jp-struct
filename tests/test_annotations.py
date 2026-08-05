@@ -244,8 +244,10 @@ class TestANonFunctionAnnotate:
 
             return ["x"]
 
-        with pytest.raises(TypeError, match="__annotations__ must be a dict"):
+        with pytest.raises(TypeError, match="__annotations__ must be a dict") as raised:
             type(Struct)("Listed", (Struct,), {"__annotate__": answers_a_list})
+
+        assert "Missing" not in str(raised.value)
 
     def test_a_partial_is_accepted_when_its_names_resolve(self):
         def annotate(format):
@@ -550,6 +552,31 @@ def test_an_interrupt_during_the_rescue_is_not_demoted_to_context():
 
 
 @pytest.mark.skipif(sys.version_info < (3, 14), reason="no escalation before 3.14")
+def test_an_interrupt_that_refuses_a_chain_keeps_refusing_it():
+    """Where the exit rule and the suppression field meet: the interrupt wins,
+    and then the field it was raised with decides whether the displaced name
+    goes behind it. `from None` says no, and nothing is attached.
+
+    Neither of the two tests around this reaches it -- one raises a bare
+    interrupt (the name is attached) and one raises it inside an `except` (the
+    name is dropped for a chain that already exists). This is the third answer,
+    and the only one that reads the field.
+    """
+
+    def annotate(format):
+        if format == 1:
+            raise NameError(name="Missing")
+
+        raise KeyboardInterrupt from None
+
+    with pytest.raises(KeyboardInterrupt) as raised:
+        type(Struct)("Interrupted", (Struct,), {"__annotate__": annotate})
+
+    assert raised.value.__context__ is None
+    assert raised.value.__suppress_context__ is True
+
+
+@pytest.mark.skipif(sys.version_info < (3, 14), reason="no escalation before 3.14")
 def test_an_interrupt_that_arrives_chained_keeps_the_chain_it_came_with():
     """The other half of the same rule, and the half where the name is lost: an
     exit raised from inside an `except` block already carries a chain, and the
@@ -641,19 +668,33 @@ class TestAShadowedSuppressionFlag:
 
         return annotate
 
-    def test_a_flag_that_raises_when_read_is_not_read(self, monkeypatch):
-        class Hostile(NameError):
+    def test_the_attribute_is_not_read_at_all(self, monkeypatch):
+        """Counted rather than raised, and that is the finding this replaces: a
+        `__getattribute__` that raises on the flag takes the *reporter* down
+        with it, because `traceback.py` reads `__suppress_context__` while it
+        formats. So the version of this test that raised could not report its
+        own failure -- it ended the pytest session instead.
+
+        Counting says the same thing and says it directly. `reads` is the
+        design: the field is what is consulted, so the attribute is never asked
+        for, by anyone, on the way to the answer below.
+        """
+
+        reads = []
+
+        class Watched(NameError):
             def __getattribute__(self, attribute):
                 if attribute == "__suppress_context__":
-                    raise KeyboardInterrupt
+                    reads.append(attribute)
 
                 return super().__getattribute__(attribute)
 
-        error = Hostile("nope", name="Missing")
+        error = Watched("nope", name="Missing")
 
-        with pytest.raises(Hostile) as raised:
+        with pytest.raises(Watched) as raised:
             type(Struct)("H", (Struct,), {"__annotate__": self.raising(error, monkeypatch)})
 
+        assert reads == []
         assert isinstance(raised.value.__context__, ImportError)
 
     def test_a_truthy_shadow_does_not_refuse_the_context(self, monkeypatch):
