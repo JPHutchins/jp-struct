@@ -127,19 +127,20 @@ def test_the_source_text_form_is_refused_too(text, form):
     """`from __future__ import annotations` leaves the annotation as its own
     source, where the spelling is all there is to go on.
 
-    The spacings are legal Python and stored verbatim, and an earlier boundary
-    rule that enumerated openers and closers separately let every one of them
-    through -- accepting a space before the form and not after it.
+    Each case is a shape the spelling has to survive, and each is a pin on the
+    current rule rather than a claim about how it got here. The spacings are
+    legal Python and stored verbatim. A str may hold a NUL, so the scan takes
+    its length from the str and not from a terminator. The quoted one is a
+    nested forward reference and has to be refused for the same reason the bare
+    spelling is. The euro sign is not an identifier character, and a lone
+    surrogate cannot be encoded to UTF-8 at all -- so the boundary works on
+    code points, where neither is anything special. The surrogate is built with
+    chr() rather than written as a literal, because a source file holding one
+    cannot be compiled.
 
-    A str may hold a NUL, and scanning with `strstr` stopped at it, leaving the
-    rest unread and the guard silently off. The quoted one is a nested forward
-    reference and has to be refused for the same reason the bare spelling is.
-
-    The euro sign is not an identifier character and a lone surrogate cannot be
-    encoded to UTF-8; both used to reach the guard as bytes, where the first
-    looked like part of a name and the second failed the encode and was waved
-    through. The surrogate is built with chr() rather than written as a literal,
-    because a source file holding one cannot be compiled.
+    (Every one of those was a bug at some point, which is why the list looks
+    like this. None of these tests can tell you that: they would pass on an
+    implementation that never had them.)
 
     The expected form is asserted, not just the refusal: matching only "salix
     does not support" would pass with the two `names_form` calls swapped.
@@ -172,10 +173,11 @@ def test_a_name_that_merely_contains_the_form_is_a_field(text):
     """The boundary is an identifier character on either side, so widening what
     counts as a separator must not widen what counts as the form.
 
-    Five of these are legal identifiers under PEP 3131, and the combining acute
+    Eleven of the fourteen are legal identifiers; the last six are the ones
+    that say something a plain ASCII rule would get wrong. The combining acute
     and the middle dot are why the boundary asks Python rather than a table:
     both continue an identifier without being letters, which is the kind of
-    character a hand-written rule gets wrong in the silent direction.
+    character a hand-written rule misses in the silent direction.
 
     `x1ClassVar` is why the opening side asks the same question as the closing
     one. A digit continues a name without being able to start one, so a
@@ -229,24 +231,27 @@ def test_a_plain_annotated_is_still_a_field():
     assert Tagged(1, []).v == 1
 
 
-def test_a_real_future_annotations_module_takes_the_text_path(tmp_path):
+@pytest.mark.parametrize("FORM", [ClassVar, InitVar], ids=["ClassVar", "InitVar"])
+def test_a_real_future_annotations_module_takes_the_text_path(tmp_path, FORM):
     """Every other text-path case here hands salix a string it built itself.
     This one makes the compiler produce the annotations, which is the only way
-    to know the path is reachable the way a user reaches it.
+    to know the path is reachable the way a user reaches it -- and both forms
+    go through it, because what the compiler stores is the source text and the
+    two forms are different text.
     """
 
     module = tmp_path / "future_struct.py"
     module.write_text(
         "from __future__ import annotations\n"
-        "from typing import ClassVar\n"
+        f"from {FORM.__module__} import {FORM.__name__}\n"
         "from salix import Struct\n"
         "\n"
         "class Registry(Struct):\n"
-        "    instances: ClassVar[list] = []\n"
+        f"    instances: {FORM.__name__}[list] = []\n"
         "    name: str\n"
     )
 
-    with pytest.raises(TypeError, match="annotated ClassVar"):
+    with pytest.raises(TypeError, match=f"annotated {FORM.__name__}"):
         exec(compile(module.read_text(), str(module), "exec"), {"__name__": "future_struct"})
 
 
@@ -277,14 +282,16 @@ def test_a_real_future_annotations_module_still_builds_ordinary_fields():
     sys.version_info < (3, 11),
     reason="typing refuses a bare special form as an Annotated argument before 3.11",
 )
-@pytest.mark.parametrize("form", [ClassVar, InitVar])
+@pytest.mark.parametrize("form", [ClassVar, InitVar], ids=["ClassVar", "InitVar"])
 def test_a_bare_form_inside_annotated_is_refused_on_the_object_path(form):
     """`Annotated[ClassVar, 'meta']` -- the form unsubscripted, one hop down.
     The subscripted shape is covered above; this is the one where `__origin__`
     reaches the form object itself rather than a `_GenericAlias` of it.
     """
 
-    with pytest.raises(TypeError, match="salix does not support"):
+    label = "InitVar" if form is InitVar else "ClassVar"
+
+    with pytest.raises(TypeError, match=f"annotated {label}"):
         type(Struct)("Wrapped", (Struct,), {"__annotations__": {"v": Annotated[form, "meta"]}})
 
 
@@ -411,10 +418,45 @@ def test_a_failing_origin_probe_fails_the_class():
     assert Ordinary.__struct_fields__ == ("v",)
 
 
+def test_an_annotation_that_rewrites_the_annotations_does_not_take_the_walk_with_it():
+    """The object path asks the annotation for `__origin__`, which runs the
+    class author's code, which can reach the dict being walked. `PyDict_Next`
+    is only defined while the dict is unmodified, so the names are taken first
+    and each annotation is looked up again as it is reached.
+
+    A field added during the walk is not declared -- it was not there when the
+    class body ended -- and one deleted during it is skipped rather than read
+    from a pointer the dict no longer owns.
+    """
+
+    annotations = {}
+
+    class Rewrites:
+        def __getattr__(self, name: str) -> object:
+            if name == "__origin__":
+                annotations.pop("doomed", None)
+
+                for i in range(64):
+                    annotations[f"grown{i}"] = int
+
+            raise AttributeError(name)
+
+    annotations.update({"first": Rewrites(), "doomed": int, "last": int})
+
+    Built = type(Struct)("Rewritten", (Struct,), {"__annotations__": annotations})
+
+    assert Built.__struct_fields__ == ("first", "last")
+
+
 def test_the_object_path_is_skipped_when_neither_module_is_loaded(monkeypatch):
-    """salix imports neither typing nor dataclasses, so on a bare interpreter
-    both probes come back absent and no annotation object can be either form.
-    The walk is skipped entirely, and an ordinary class still builds.
+    """Both probes absent means no annotation object can be either form, so the
+    walk is skipped entirely and an ordinary class still builds -- asserted by
+    an annotation that records every attribute anyone asks it for.
+
+    Removed from a populated sys.modules rather than run on a bare interpreter,
+    which is the shape available here. It is the same state a module salix has
+    not imported would produce, but this test does not establish that salix
+    imports neither: what it pins is what the code does when they are absent.
     """
 
     monkeypatch.delitem(sys.modules, "typing", raising=False)

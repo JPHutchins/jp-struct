@@ -163,10 +163,6 @@ static enum result append_declared(
 	PyObject * const new_names,
 	PyObject * const default_by_name
 ) {
-	PyObject * field_name;
-	PyObject * annotation;
-	Py_ssize_t position = 0;
-
 	/* A class with no annotations of its own declares no fields and so can name
 	 * no forms; the four probes below are the whole cost of asking. */
 	if (PyDict_GET_SIZE(annotations) == 0) {
@@ -213,7 +209,29 @@ static enum result append_declared(
 		.init_var_name = init_var_name,
 	};
 
-	while (PyDict_Next(annotations, &position, &field_name, &annotation)) {
+	/* The names are taken first, because the object path asks the annotation
+	 * for `__origin__` and `__args__` and that runs the class author's code --
+	 * which can add to or delete from this very dict. PyDict_Next's cursor and
+	 * the pointers it hands back are only defined while the dict is unmodified,
+	 * and one list per class is a cheap way not to depend on which mutations
+	 * CPython happens to survive. */
+	PY_OWNED(declared, PyDict_Keys(annotations));
+
+	if (declared == NULL) {
+		return RESULT_ERROR;
+	}
+
+	for (Py_ssize_t at = 0; at < PyList_GET_SIZE(declared); ++at) {
+		PyObject * const field_name = PyList_GET_ITEM(declared, at);
+
+		/* Held, because a later annotation's `__getattr__` may have deleted this
+		 * one between the snapshot and here -- and gone is not a field. */
+		PY_OWNED(annotation, Py_XNewRef(PyDict_GetItem(annotations, field_name)));
+
+		if (annotation == NULL) {
+			continue;
+		}
+
 		if (!PyUnicode_CheckExact(field_name)) {
 			PyErr_SetString(PyExc_TypeError, "annotation keys must be strings");
 
