@@ -28,8 +28,8 @@ COPIED_WHEN_EMPTY = (list, dict, set, bytearray)
 # bytearray wants small ints. The assertion is what keeps the two from drifting.
 NON_EMPTY = {list: [1], dict: {"k": 1}, set: {1}, bytearray: bytearray(b"x")}
 
-# The first caught nothing and the second caught `b"x"`, which is a bytes and so
-# is not refused at all -- the seed has to be an instance of its own key.
+# A seed is an exact instance of its own key, and it is non-empty; `b"x"` is a
+# bytes rather than a bytearray and would not be refused at all.
 assert set(NON_EMPTY) == set(COPIED_WHEN_EMPTY)
 assert all(type(value) is kind and len(value) > 0 for kind, value in NON_EMPTY.items())
 

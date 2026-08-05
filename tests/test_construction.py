@@ -30,6 +30,12 @@ class Renamed(Struct):
     value_two: int
 
 
+def subclass_of(kind: type) -> type:
+    """A subclass of one of the four, which is not one of the four."""
+
+    return type(f"A{kind.__name__.capitalize()}", (kind,), {})
+
+
 def test_positional_and_keyword_reach_the_same_slots():
     assert Point(1, 2) == Point(x=1, y=2) == Point(1, y=2)
 
@@ -153,12 +159,15 @@ class TestMutableDefaults:
         assert Holder().v == factory()
 
     def test_an_immutable_default_is_shared(self):
-        """Sharing holds. That is the whole of what this can say, and the
-        vacuity that took an int out of it was never the int's -- it is every
-        immutable's. Measured: `str(s)`, `tuple(t)`, `copy.copy` and a full
-        slice all hand the same object back, so both assertions below pass
-        whether salix shares the default or copies everything. Even the struct
-        cannot be copied to compare against; `copy.copy(Inner(1))` raises, #13.
+        """Sharing holds. Two of the three assertions say little on their own,
+        and the vacuity that took an int out of this was never the int's -- it
+        is every immutable's. Measured: `str(s)`, `tuple(t)`, `copy.copy` and a
+        full slice all hand the same object back, so the text and pair
+        assertions pass whether salix shares the default or copies everything.
+
+        The nested struct is the one that discriminates, and for the reason
+        that makes the other two vacuous: `copy.copy(Inner(1))` raises (#13), so
+        a salix that copied every default could not get past this field at all.
 
         The str is still built at runtime rather than written as a literal, and
         that buys less than the earlier wording claimed. It does not make the
@@ -269,6 +278,10 @@ class TestMutableDefaults:
             pytest.param(__import__("collections").deque([1, 2]), id="deque"),
             pytest.param(memoryview(bytearray(b"abc")), id="memoryview"),
             pytest.param(Mutable(1), id="a_mutable_struct"),
+            *(
+                pytest.param(subclass_of(kind)(NON_EMPTY[kind]), id=f"a_{kind.__name__}_subclass")
+                for kind in COPIED_WHEN_EMPTY
+            ),
         ],
     )
     def test_a_mutable_container_outside_the_four_is_shared_and_not_refused(self, value):
@@ -276,6 +289,12 @@ class TestMutableDefaults:
         neither copied nor refused. Every one is unhashable, which is the test
         #51 argues should replace the list -- salix's own `frozen=False` struct
         included, since `eq` without `frozen` sets `__hash__` to None.
+
+        The four subclasses are the sharpest of them: a *non-empty* subclass of
+        a type the refusal covers is shared outright, which is the aliasing bug
+        this file is otherwise about. It is the price of copying by exact type,
+        since `PyDict_Copy` of a defaultdict is a dict, and it is deliberate
+        rather than missed.
 
         `hash(value)` rather than `isinstance(value, Hashable)`: the ABC asks
         whether `__hash__` is non-None, and a writable memoryview has one that

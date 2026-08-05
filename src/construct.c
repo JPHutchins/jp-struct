@@ -232,29 +232,49 @@ static enum result fill_defaults(
  * dataclasses refuses the shape outright and needs default_factory to express
  * it at all. This copies, so the common spelling means what it looks like it
  * means, and pays for it only on the fields that have one.
+ *
+ * A row is a type and the constructor that copies it, because no predicate can
+ * supply the second. One table, so the refusal and the copy cannot come to
+ * different answers about which types those are.
  */
+struct default_copy {
+	PyTypeObject const * kind;
+	PyObject * (*copy)(PyObject * declared);
+};
+
+/* PyList_GetSlice takes bounds; the other three constructors take the object. */
+static PyObject * copy_list(PyObject * const declared) {
+	return PyList_GetSlice(declared, 0, PyList_GET_SIZE(declared));
+}
+
+static struct default_copy const COPIED_WHEN_EMPTY[] = {
+	{.kind = &PyList_Type, .copy = copy_list},
+	{.kind = &PyDict_Type, .copy = PyDict_Copy},
+	{.kind = &PySet_Type, .copy = PySet_New},
+	{.kind = &PyByteArray_Type, .copy = PyByteArray_FromObject},
+};
+
+static struct default_copy const * copies_default(PyTypeObject const * const kind) {
+	for (size_t at = 0; at < sizeof COPIED_WHEN_EMPTY / sizeof *COPIED_WHEN_EMPTY; ++at) {
+		if (COPIED_WHEN_EMPTY[at].kind == kind) {
+			return &COPIED_WHEN_EMPTY[at];
+		}
+	}
+
+	return NULL;
+}
+
+bool struct_copies_default(PyTypeObject const * const kind) {
+	return copies_default(kind) != NULL;
+}
+
 PyObject * struct_default_copy(PyObject * const declared) {
-	PyTypeObject * const kind = Py_TYPE(declared);
+	struct default_copy const * const copier = copies_default(Py_TYPE(declared));
 
-	if (kind == &PyList_Type) {
-		return PyList_GetSlice(declared, 0, PyList_GET_SIZE(declared));
-	}
-
-	if (kind == &PyDict_Type) {
-		return PyDict_Copy(declared);
-	}
-
-	if (kind == &PySet_Type) {
-		return PySet_New(declared);
-	}
-
-	if (kind == &PyByteArray_Type) {
-		return PyByteArray_FromObject(declared);
-	}
-
-	/* Everything else, which is the answer that degrades safely: copying with a
-	 * constructor for the wrong type would change the value. */
-	return Py_NewRef(declared);
+	/* Everything else is the object itself, a subclass of one of the four
+	 * included: copying with a constructor for the wrong type would change the
+	 * value. */
+	return copier != NULL ? copier->copy(declared) : Py_NewRef(declared);
 }
 
 /*

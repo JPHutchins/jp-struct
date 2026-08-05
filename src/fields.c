@@ -202,10 +202,12 @@ static enum inheritance inherits_field(StructType const * const base, PyObject *
  *
  * It over-fires deliberately on a class whose body writes its own __init__.
  * That class displaces the generated constructor, so its declared default is
- * never handed to an instance and the message's "every instance would share"
- * is about nothing -- and the same is true of every subclass below it. #56 is
- * where the whole question of a dead default belongs, and refusing the same
- * shape everywhere is the answer until it is settled.
+ * never handed to an instance at all -- and the same is true of every subclass
+ * below it. #56 is where the whole question of a dead default belongs, and
+ * refusing the same shape everywhere is the answer until it is settled. The
+ * message states the rule rather than a consequence for that reason, and names
+ * the remedy that still works there: __post_init__ runs from the constructor a
+ * body __init__ displaces, so only set_field from that __init__ is left.
  */
 static enum result reject_unsafe_default(PyObject * const field_name, PyObject * const value) {
 	PyTypeObject * const kind = Py_TYPE(value);
@@ -217,9 +219,11 @@ static enum result reject_unsafe_default(PyObject * const field_name, PyObject *
 
 	PyErr_Format(
 		PyExc_TypeError,
-		"field '%U' defaults to a non-empty %.100s, which every instance would "
-		"share the contents of; default it to an empty one and fill it from "
-		"__post_init__, or from your own __init__, with set_field",
+		"field '%U' defaults to a non-empty %.100s, whose copy could only be "
+		"shallow and would leave the contents shared; default it to an empty "
+		"one and fill it with set_field -- from __post_init__, or from your own "
+		"__init__ if the body writes one, which displaces the constructor "
+		"__post_init__ runs from",
 		field_name,
 		kind->tp_name
 	);
