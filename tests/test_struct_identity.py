@@ -61,13 +61,17 @@ class TestAMixinSubclass:
 
         assert impostor.z == 1
 
-    def test_it_has_no_field_names_to_report(self, impostor):
-        with pytest.raises(TypeError, match="__struct_fields__ is defined on structs"):
-            _ = impostor.__struct_fields__
+    @pytest.mark.parametrize("attribute", ["__struct_fields__", "__struct_defaults__"])
+    def test_it_has_no_metadata_to_report(self, impostor, attribute):
+        """An AttributeError rather than a TypeError, because that is what the
+        two facilities for asking whether an attribute is there catch.
+        """
 
-    def test_it_has_no_defaults_to_report(self, impostor):
-        with pytest.raises(TypeError, match="__struct_defaults__ is defined on structs"):
-            _ = impostor.__struct_defaults__
+        with pytest.raises(AttributeError, match=f"{attribute} is defined on structs"):
+            getattr(impostor, attribute)
+
+        assert not hasattr(impostor, attribute)
+        assert getattr(impostor, attribute, "absent") == "absent"
 
     def test_set_field_still_refuses_it(self, impostor):
         with pytest.raises(TypeError, match="expects a struct"):
@@ -78,10 +82,14 @@ class TestTheMetaclassWithoutTheMixin:
     def test_the_module_does_not_offer_it(self):
         """#15: reaching the metaclass takes `type(Struct)`, which is what the
         rest of this class does. What is gone is the invitation to.
+
+        The second assertion is the relationship rather than the spelling: the
+        name a repr shows is not a name the module answers to, whatever that
+        name is later changed to.
         """
 
         assert not hasattr(salix, "StructMeta")
-        assert META.__name__ == "_StructMeta"
+        assert not hasattr(salix, META.__name__)
 
     def test_a_class_body_naming_it_is_refused(self):
         with pytest.raises(TypeError, match="a struct class inherits salix"):

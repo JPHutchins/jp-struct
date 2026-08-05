@@ -113,6 +113,23 @@ static inline PyObject * struct_tuple_or_empty(PyObject * const tuple) {
 	return tuple != NULL ? Py_NewRef(tuple) : PyTuple_New(0);
 }
 
+/* Which of the two metadata tuples is being asked for. The class answers
+ * through the metaclass and the instance through the mixin, so without this the
+ * same read is written out four times. */
+enum struct_metadata : int {
+	STRUCT_FIELD_NAMES,
+	STRUCT_DEFAULTS,
+};
+
+static inline PyObject * struct_metadata(
+	StructType const * const type,
+	enum struct_metadata const which
+) {
+	return struct_tuple_or_empty(
+		which == STRUCT_DEFAULTS ? type->struct_defaults : type->struct_field_names
+	);
+}
+
 /* Access the PyMemberDef array that floats behind a heap type. Mirrors
  * msgspec's MS_PyHeapType_GET_MEMBERS: the members live just past the type
  * object, which (for a custom metaclass) is sized by the metaclass basicsize. */

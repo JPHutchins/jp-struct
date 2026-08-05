@@ -10,7 +10,7 @@
 static int Struct_set_attribute(PyObject * self, PyObject * name, PyObject * value);
 static PyObject * Struct_get_field_names(PyObject * self, void * closure);
 static PyObject * Struct_get_defaults(PyObject * self, void * closure);
-static PyObject * not_a_struct(PyObject * self, char const * name);
+static PyObject * metadata_of(PyObject * self, enum struct_metadata which, char const * name);
 static PyGetSetDef Struct_getset[];
 
 PyTypeObject StructMixin_Type = {
@@ -53,11 +53,22 @@ static PyGetSetDef Struct_getset[] = {
  * private class.
  *
  * The two getsets are the exception either way: they report struct metadata and
- * nothing else, so there is nothing to fall back to and they raise.
+ * nothing else, so there is nothing to fall back to and they raise. An
+ * AttributeError rather than a TypeError, because "this object does not have
+ * that attribute" is what happened and it is what `hasattr` and `getattr`'s
+ * default are written to catch.
  */
-static PyObject * not_a_struct(PyObject * const self, char const * const name) {
+static PyObject * metadata_of(
+	PyObject * const self,
+	enum struct_metadata const which,
+	char const * const name
+) {
+	if (is_struct(self)) {
+		return struct_metadata(struct_type_of(self), which);
+	}
+
 	PyErr_Format(
-		PyExc_TypeError,
+		PyExc_AttributeError,
 		"%s is defined on structs, and %.200s is not one",
 		name,
 		Py_TYPE(self)->tp_name
@@ -87,16 +98,11 @@ static int Struct_set_attribute(
 	return RESULT_ERROR;
 }
 
+/* Two entry points because the getset table needs two; the answer is one. */
 static PyObject * Struct_get_field_names(PyObject * const self, void * const closure) {
-	return (
-		is_struct(self) ? struct_tuple_or_empty(struct_type_of(self)->struct_field_names) :
-		not_a_struct(self, "__struct_fields__")
-	);
+	return metadata_of(self, STRUCT_FIELD_NAMES, "__struct_fields__");
 }
 
 static PyObject * Struct_get_defaults(PyObject * const self, void * const closure) {
-	return (
-		is_struct(self) ? struct_tuple_or_empty(struct_type_of(self)->struct_defaults) :
-		not_a_struct(self, "__struct_defaults__")
-	);
+	return metadata_of(self, STRUCT_DEFAULTS, "__struct_defaults__");
 }

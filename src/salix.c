@@ -121,11 +121,5 @@ static PyObject * create_struct_base(void) {
 		return NULL;
 	}
 
-	PY_OWNED(args, PyTuple_Pack(3, name, bases, namespace));
-
-	if (args == NULL) {
-		return NULL;
-	}
-
-	return StructMeta_new(&StructMeta_Type, args, NULL);
+	return struct_create_root(name, bases, namespace);
 }
