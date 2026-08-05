@@ -233,32 +233,37 @@ static enum result fill_defaults(
  * it at all. This copies, so the common spelling means what it looks like it
  * means, and pays for it only on the fields that have one.
  *
- * A row is a type and the constructor that copies it, because no predicate can
- * supply the second. One table, so the refusal and the copy cannot come to
- * different answers about which types those are.
+ * The type and the constructor that copies it are named together, because no
+ * predicate can supply the second. One list, so the refusal and the copy cannot
+ * come to different answers about which types those are.
+ *
+ * A list of statements rather than a static array of {type, constructor}: on
+ * Windows a `PyTypeObject` is imported from python3.dll, and the address of a
+ * dllimport symbol is not a compile-time constant, so the array version
+ * compiles everywhere except the platform half the wheels are cross-built for.
  */
-struct default_copy {
-	PyTypeObject const * kind;
-	PyObject * (*copy)(PyObject * declared);
-};
+typedef PyObject * (*default_copier)(PyObject * declared);
 
 /* PyList_GetSlice takes bounds; the other three constructors take the object. */
 static PyObject * copy_list(PyObject * const declared) {
 	return PyList_GetSlice(declared, 0, PyList_GET_SIZE(declared));
 }
 
-static struct default_copy const COPIED_WHEN_EMPTY[] = {
-	{.kind = &PyList_Type, .copy = copy_list},
-	{.kind = &PyDict_Type, .copy = PyDict_Copy},
-	{.kind = &PySet_Type, .copy = PySet_New},
-	{.kind = &PyByteArray_Type, .copy = PyByteArray_FromObject},
-};
+static default_copier copies_default(PyTypeObject const * const kind) {
+	if (kind == &PyList_Type) {
+		return copy_list;
+	}
 
-static struct default_copy const * copies_default(PyTypeObject const * const kind) {
-	for (size_t at = 0; at < sizeof COPIED_WHEN_EMPTY / sizeof *COPIED_WHEN_EMPTY; ++at) {
-		if (COPIED_WHEN_EMPTY[at].kind == kind) {
-			return &COPIED_WHEN_EMPTY[at];
-		}
+	if (kind == &PyDict_Type) {
+		return PyDict_Copy;
+	}
+
+	if (kind == &PySet_Type) {
+		return PySet_New;
+	}
+
+	if (kind == &PyByteArray_Type) {
+		return PyByteArray_FromObject;
 	}
 
 	return NULL;
@@ -269,12 +274,12 @@ bool struct_copies_default(PyTypeObject const * const kind) {
 }
 
 PyObject * struct_default_copy(PyObject * const declared) {
-	struct default_copy const * const copier = copies_default(Py_TYPE(declared));
+	default_copier const copy = copies_default(Py_TYPE(declared));
 
 	/* Everything else is the object itself, a subclass of one of the four
 	 * included: copying with a constructor for the wrong type would change the
 	 * value. */
-	return copier != NULL ? copier->copy(declared) : Py_NewRef(declared);
+	return copy != NULL ? copy(declared) : Py_NewRef(declared);
 }
 
 /*
