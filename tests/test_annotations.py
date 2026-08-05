@@ -620,8 +620,14 @@ class TestAHostileNameAttribute:
 @pytest.mark.skipif(sys.version_info < (3, 14), reason="no escalation before 3.14")
 class TestAHostileSuppressionFlag:
     """`__suppress_context__` has no C accessor, so reading it runs the
-    attribute protocol on the same author-written class. It gets the same rule
-    the `.name` lookup gets, rather than a quieter one of its own.
+    attribute protocol on the same author-written class as the `.name` lookup.
+
+    An exit from either wins, which is the half the two reads share. An
+    ordinary failure does not, and the two tests below are the difference: the
+    `.name` read asks what to raise, so its failure goes behind the NameError
+    (`test_an_ordinary_failure_from_the_lookup_loses`); this read asks whether
+    the winner will accept a `__context__`, and a read that raised has not said
+    yes, so nothing is attached -- including itself.
     """
 
     @staticmethod

@@ -196,10 +196,17 @@ static void raise_over(PyObject * const displaced, PyObject * const failure) {
 		case CONTEXT_SLOT_UNREADABLE: {
 			/* Looking raised, on a class the annotation author wrote. An exit
 			 * from there is still an exit and takes the same rule the top of
-			 * this function applies: it wins, and what it displaced goes
-			 * behind it where there is room. Anything else is dropped -- it is
-			 * a failure to read a flag on the way to reporting something that
-			 * matters more, and the `.name` lookup answers the same way.
+			 * this function applies: it wins, and what it displaced goes behind
+			 * it where there is room. That much the two author-controlled reads
+			 * share.
+			 *
+			 * An ordinary failure does not, and the difference is the question
+			 * each read was asking. The `.name` read asks what to raise, so its
+			 * failure is a candidate answer and the caller puts it behind the
+			 * NameError. This one asks whether the winner will accept a
+			 * __context__ -- and a read that raised has not said yes, so
+			 * nothing is attached, including itself. Attaching it would be
+			 * writing to the slot the failed read was asking permission for.
 			 *
 			 * A second unreadable answer attaches nothing rather than asking a
 			 * third time. */
