@@ -147,18 +147,21 @@ class TestMutableDefaults:
         assert Holder().v is not Holder().v
 
     def test_an_immutable_default_is_shared(self):
-        """The str is built at runtime rather than written as a literal, because
-        an interned literal is shared by CPython whatever salix does. Not
-        `"not interned " * 2` either: the peephole optimiser folds that to one,
-        which is the trap this docstring named and the code then fell into.
-        `str.join` survives compilation.
+        """Sharing holds. That is the whole of what this can say, and the
+        vacuity that took an int out of it was never the int's -- it is every
+        immutable's. Measured: `str(s)`, `tuple(t)`, `copy.copy` and a full
+        slice all hand the same object back, so both assertions below pass
+        whether salix shares the default or copies everything. Even the struct
+        cannot be copied to compare against; `copy.copy(Inner(1))` raises, #13.
 
-        No int is here at all, after three attempts to find one that would say
-        something. `10**20` folds; so does `10**20 + 0`, to the same constant;
-        and `int(n)` and `copy.copy(n)` both hand an int back unchanged. Both
-        slots therefore hold one object whether salix shares the default or
-        copies everything, so an int can only ever assert that CPython
-        deduplicates ints.
+        The str is still built at runtime rather than written as a literal, and
+        that buys less than the earlier wording claimed. It does not make the
+        assertion discriminating. It means a salix that *rebuilt* the string
+        rather than storing the declared one would be caught here, where an
+        interned literal would hide it.
+
+        What actually pins the copying is the test above: a mutable default is
+        a distinct object per instance, and that assertion can fail.
         """
 
         class Inner(Struct):
