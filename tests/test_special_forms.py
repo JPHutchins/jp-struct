@@ -165,16 +165,23 @@ def test_the_source_text_form_is_refused_too(text, form):
         "ÄClassVar",
         "ClassVar\u0301",
         "ClassVar\u00b7",
+        "x1ClassVar",
     ],
 )
 def test_a_name_that_merely_contains_the_form_is_a_field(text):
     """The boundary is an identifier character on either side, so widening what
     counts as a separator must not widen what counts as the form.
 
-    The last five are legal identifiers under PEP 3131, and the last two are why
-    the boundary asks Python rather than a table: a combining acute and a middle
-    dot both continue an identifier without being letters, which is the kind of
+    Five of these are legal identifiers under PEP 3131, and the combining acute
+    and the middle dot are why the boundary asks Python rather than a table:
+    both continue an identifier without being letters, which is the kind of
     character a hand-written rule gets wrong in the silent direction.
+
+    `x1ClassVar` is why the opening side asks the same question as the closing
+    one. A digit continues a name without being able to start one, so a
+    leading-side rule built on "can this character begin an identifier" refuses
+    this, and Python is perfectly happy with it. Whether a prefix is a valid
+    identifier is not decidable one character at a time.
     """
 
     Ordinary = type(Struct)("Ordinary", (Struct,), {"__annotations__": {"v": text}})
