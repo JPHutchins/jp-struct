@@ -729,19 +729,13 @@ static PyObject * StructMeta_call(
  * after it exists is not seen.
  */
 static enum result install_post_init(StructType * const struct_class) {
-	PyObject * const hook = PyObject_GetAttrString((PyObject *) struct_class, "__post_init__");
+	PyObject * const hook = optional_attribute((PyObject *) struct_class, "__post_init__");
 
-	if (hook != NULL) {
-		struct_class->struct_post_init = hook;
-
-		return RESULT_OK;
-	}
-
-	if (!PyErr_ExceptionMatches(PyExc_AttributeError)) {
+	if (hook == NULL && PyErr_Occurred()) {
 		return RESULT_ERROR;
 	}
 
-	PyErr_Clear();
+	struct_class->struct_post_init = hook;
 
 	return RESULT_OK;
 }
