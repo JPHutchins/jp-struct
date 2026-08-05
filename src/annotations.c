@@ -23,18 +23,10 @@ enum symbol_verdict {
 	SYMBOL_UNREADABLE,
 };
 
-/* Whether an exception will take a __context__. Not "is it chained": an
- * exception can refuse one while carrying neither a cause nor a context. */
-enum context_slot {
-	CONTEXT_SLOT_FREE,
-	CONTEXT_SLOT_SPOKEN_FOR,
-	CONTEXT_SLOT_UNREADABLE,
-};
-
 static enum symbol_verdict names_an_unresolved_symbol(PyObject * error);
 static PyObject * escalate(PyObject * annotate);
 static void raise_over(PyObject * displaced, PyObject * failure);
-static enum context_slot context_slot_of(PyObject * error);
+static bool context_slot_is_free(PyObject * error);
 #endif
 
 PyObject * struct_annotations(PyObject * const namespace) {
@@ -184,46 +176,8 @@ static void raise_over(PyObject * const displaced, PyObject * const failure) {
 	PY_MOVABLE(primary, exits ? failure : displaced);
 	PY_MOVABLE(behind, exits ? displaced : failure);
 
-	switch (context_slot_of(primary)) {
-		case CONTEXT_SLOT_FREE:
-			PyException_SetContext(primary, py_move(&behind));
-
-			break;
-
-		case CONTEXT_SLOT_SPOKEN_FOR:
-			break;
-
-		case CONTEXT_SLOT_UNREADABLE: {
-			/* Looking raised, on a class the annotation author wrote. An exit
-			 * from there is still an exit and takes the same rule the top of
-			 * this function applies: it wins, and what it displaced goes behind
-			 * it where there is room. That much the two author-controlled reads
-			 * share.
-			 *
-			 * An ordinary failure does not, and the difference is the question
-			 * each read was asking. The `.name` read asks what to raise, so its
-			 * failure is a candidate answer and the caller puts it behind the
-			 * NameError. This one asks whether the winner will accept a
-			 * __context__ -- and a read that raised has not said yes, so
-			 * nothing is attached, including itself. Attaching it would be
-			 * writing to the slot the failed read was asking permission for.
-			 *
-			 * A second unreadable answer attaches nothing rather than asking a
-			 * third time. */
-			PY_MOVABLE(looking, PyErr_GetRaisedException());
-
-			if (looking == NULL || PyErr_GivenExceptionMatches(looking, PyExc_Exception)) {
-				break;
-			}
-
-			if (context_slot_of(looking) == CONTEXT_SLOT_FREE) {
-				PyException_SetContext(looking, py_move(&primary));
-			}
-
-			PyErr_SetRaisedException(py_move(&looking));
-
-			return;
-		}
+	if (context_slot_is_free(primary)) {
+		PyException_SetContext(primary, py_move(&behind));
 	}
 
 	PyErr_SetRaisedException(py_move(&primary));
@@ -237,43 +191,26 @@ static void raise_over(PyObject * const displaced, PyObject * const failure) {
  * Both getters hand back a reference, so both are held rather than tested in
  * place, and between them they still miss that case: `from None` stores None as
  * the cause, and PyException_GetCause reports that as no cause at all. The
- * suppression flag is the only thing separating it from an exception that was
- * simply never chained, and there is no C accessor for it.
+ * suppression flag is what separates it from an exception that was simply never
+ * chained.
  *
- * So it is read through the attribute protocol, on an exception whose class the
- * annotation author may have written, and a failure to look is a third answer
- * rather than a guess -- the caller decides, the same way it does for the
- * `.name` lookup. PyObject_IsTrue rather than a test against True, because the
- * interpreter's own traceback printer asks the flag that question and a
- * shadowed truthy value should mean here what it means there.
+ * The flag is a field of PyException_HEAD -- which pyerrors.h introduces as
+ * "the initial segment of every exception class" -- and there is no accessor
+ * function for it. The field and not the attribute of the same name, because
+ * `raise ... from None` writes the field, and the attribute is what the
+ * annotation author's class can shadow either way. Reading the field also asks
+ * nothing of a class that could answer by raising, so every answer here is one
+ * of two rather than three.
  */
-static enum context_slot context_slot_of(PyObject * const error) {
+static bool context_slot_is_free(PyObject * const error) {
 	PY_OWNED(context, PyException_GetContext(error));
 	PY_OWNED(cause, PyException_GetCause(error));
 
-	if (context != NULL || cause != NULL) {
-		return CONTEXT_SLOT_SPOKEN_FOR;
-	}
-
-	PyObject * found = NULL;
-
-	if (PyObject_GetOptionalAttrString(error, "__suppress_context__", &found) < 0) {
-		return CONTEXT_SLOT_UNREADABLE;
-	}
-
-	PY_OWNED(suppressed, found);
-
-	if (suppressed == NULL) {
-		return CONTEXT_SLOT_FREE;
-	}
-
-	int const refused = PyObject_IsTrue(suppressed);
-
-	if (refused < 0) {
-		return CONTEXT_SLOT_UNREADABLE;
-	}
-
-	return refused == 1 ? CONTEXT_SLOT_SPOKEN_FOR : CONTEXT_SLOT_FREE;
+	return (
+		context == NULL &&
+		cause == NULL &&
+		!((PyBaseExceptionObject *) error)->suppress_context
+	);
 }
 
 /*

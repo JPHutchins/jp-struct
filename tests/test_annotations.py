@@ -618,16 +618,15 @@ class TestAHostileNameAttribute:
 
 
 @pytest.mark.skipif(sys.version_info < (3, 14), reason="no escalation before 3.14")
-class TestAHostileSuppressionFlag:
-    """`__suppress_context__` has no C accessor, so reading it runs the
-    attribute protocol on the same author-written class as the `.name` lookup.
+class TestAShadowedSuppressionFlag:
+    """The suppression flag is read as the field `raise ... from None` writes,
+    so the attribute of the same name is never asked for. What the annotation
+    author's class says through that attribute -- truthy, falsy, or an
+    exception -- reaches nothing here, and only the raiser is heard.
 
-    An exit from either wins, which is the half the two reads share. An
-    ordinary failure does not, and the two tests below are the difference: the
-    `.name` read asks what to raise, so its failure goes behind the NameError
-    (`test_an_ordinary_failure_from_the_lookup_loses`); this read asks whether
-    the winner will accept a `__context__`, and a read that raised has not said
-    yes, so nothing is attached -- including itself.
+    The `.name` read is the other way round, because there is no field to read:
+    see TestAHostileNameAttribute, where a hostile lookup does decide the
+    outcome.
     """
 
     @staticmethod
@@ -642,7 +641,7 @@ class TestAHostileSuppressionFlag:
 
         return annotate
 
-    def test_an_exit_while_reading_the_flag_wins(self, monkeypatch):
+    def test_a_flag_that_raises_when_read_is_not_read(self, monkeypatch):
         class Hostile(NameError):
             def __getattribute__(self, attribute):
                 if attribute == "__suppress_context__":
@@ -652,41 +651,41 @@ class TestAHostileSuppressionFlag:
 
         error = Hostile("nope", name="Missing")
 
-        with pytest.raises(KeyboardInterrupt) as raised:
-            type(Struct)("H", (Struct,), {"__annotate__": self.raising(error, monkeypatch)})
-
-        assert isinstance(raised.value.__context__, Hostile)
-
-    def test_an_ordinary_failure_while_reading_the_flag_is_dropped(self, monkeypatch):
-        """It is a failure to read a flag on the way to reporting something
-        that matters more, so the name is raised and nothing goes behind it.
-        """
-
-        class Hostile(NameError):
-            def __getattribute__(self, attribute):
-                if attribute == "__suppress_context__":
-                    raise RuntimeError("looking hurt")
-
-                return super().__getattribute__(attribute)
-
-        error = Hostile("nope", name="Missing")
-
         with pytest.raises(Hostile) as raised:
             type(Struct)("H", (Struct,), {"__annotate__": self.raising(error, monkeypatch)})
 
-        assert raised.value.__context__ is None
+        assert isinstance(raised.value.__context__, ImportError)
 
-    def test_a_truthy_flag_counts_the_way_the_interpreter_counts_it(self, monkeypatch):
-        """CPython's traceback printer asks the flag for its truth, not for
-        identity with True, so a shadowed truthy value means the same here.
-        """
-
-        class Hostile(NameError):
+    def test_a_truthy_shadow_does_not_refuse_the_context(self, monkeypatch):
+        class Shadowed(NameError):
             __suppress_context__ = 1
 
-        error = Hostile("nope", name="Missing")
+        error = Shadowed("nope", name="Missing")
 
-        with pytest.raises(Hostile) as raised:
+        with pytest.raises(Shadowed) as raised:
             type(Struct)("H", (Struct,), {"__annotate__": self.raising(error, monkeypatch)})
 
+        assert raised.value.__suppress_context__ == 1
+        assert isinstance(raised.value.__context__, ImportError)
+
+    def test_a_falsy_shadow_does_not_undo_a_from_None(self, monkeypatch):
+        """The shape the attribute read got wrong: `from None` sets the field,
+        the shadow answers for the attribute, and the two disagree.
+        """
+
+        class Shadowed(NameError):
+            __suppress_context__ = 0
+
+        monkeypatch.setitem(sys.modules, "annotationlib", None)
+
+        def annotate(format):
+            if format == 1:
+                raise Shadowed("nope", name="Missing") from None
+
+            return {"x": int}
+
+        with pytest.raises(Shadowed) as raised:
+            type(Struct)("H", (Struct,), {"__annotate__": annotate})
+
+        assert raised.value.__suppress_context__ == 0
         assert raised.value.__context__ is None
