@@ -53,8 +53,27 @@ class TestAMixinSubclass:
     def test_it_reprs_as_the_object_it_is(self, impostor):
         assert "Impostor object at" in repr(impostor)
 
-    def test_it_hashes_by_identity(self, impostor):
-        assert hash(impostor) == object.__hash__(impostor)
+    def test_it_is_unhashable(self, impostor):
+        """#66: it is compared by its co-base, because rich_compare answers
+        NotImplemented and the reflected operation gets there. An identity hash
+        beside that made it equal to a value it could not be looked up beside,
+        so hashing refuses instead and the pair is consistent again.
+        """
+
+        with pytest.raises(TypeError, match="unhashable type: 'Impostor'"):
+            hash(impostor)
+
+    def test_it_cannot_be_equal_to_something_it_hashes_differently_from(self):
+        """The contract the fallback used to break, over a co-base that is
+        itself a value type: `==` said yes and the dict said no.
+        """
+
+        equal_to_a_tuple = type("Tupleish", (MIXIN, tuple), {"__slots__": ()})((1, 2))
+
+        assert equal_to_a_tuple == (1, 2)
+
+        with pytest.raises(TypeError, match="unhashable type"):
+            {(1, 2): "from the tuple"}[equal_to_a_tuple]
 
     def test_it_is_not_frozen(self, impostor):
         impostor.z = 1

@@ -42,15 +42,18 @@ static PyGetSetDef Struct_getset[] = {
 /*
  * Everything below asks whether it is looking at a struct, because the mixin is
  * a permitted base and a subclass of it need not be one. Where there is no
- * struct, repr and hash fall back to object's rather than raising -- raising
- * out of either would turn an object that is merely useless into one a debugger
- * cannot print.
+ * struct, repr falls back to object's rather than raising -- raising out of
+ * repr would turn an object that is merely useless into one a debugger cannot
+ * print.
  *
  * object's, specifically, and not the co-base's: an impostor over `list` is
- * given object's repr and hashes by pointer, where a plain list subclass is
- * unhashable. Deferring to whatever the co-base defines would mean walking the
- * MRO for something to borrow, on a path reachable only by subclassing a
- * private class.
+ * given object's repr, where a plain list subclass has its own. Deferring to
+ * whatever the co-base defines would mean walking the MRO for something to
+ * borrow, on a path reachable only by subclassing a private class.
+ *
+ * Hash is the exception, and #66 is why: it cannot be a local decision, because
+ * hashing and equality have to agree and equality here is the co-base's. It
+ * refuses instead. See src/hash.c.
  *
  * The two getsets are the exception either way: they report struct metadata and
  * nothing else, so there is nothing to fall back to and they raise. An

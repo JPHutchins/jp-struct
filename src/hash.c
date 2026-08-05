@@ -18,8 +18,17 @@ enum : Py_hash_t {
  * a Python frame, so the interpreter's own depth limit never sees the descent.
  */
 Py_hash_t Struct_hash(PyObject * const self) {
+	/* Unhashable rather than hashed by pointer, which is the one fallback in
+	 * this file that could not be a local decision. A mixin subclass over a
+	 * value type is compared by that type -- rich_compare answers
+	 * NotImplemented and the co-base's reflected __eq__ says yes -- so an
+	 * identity hash made it equal to a value it could not be looked up beside.
+	 * Refusing to hash is what puts equality and hashing back in one place, and
+	 * being unhashable is an ordinary thing for an object to be. #66. */
 	if (!is_struct(self)) {
-		return PyBaseObject_Type.tp_hash(self);
+		PyErr_Format(PyExc_TypeError, "unhashable type: '%.200s'", Py_TYPE(self)->tp_name);
+
+		return HASH_ERR;
 	}
 
 	StructType const * const type = struct_type_of(self);

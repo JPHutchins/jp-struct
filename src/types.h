@@ -125,9 +125,16 @@ static inline PyObject * struct_metadata(
 	StructType const * const type,
 	enum struct_metadata const which
 ) {
-	return struct_tuple_or_empty(
-		which == STRUCT_DEFAULTS ? type->struct_defaults : type->struct_field_names
-	);
+	/* Matched rather than tested, so that a third kind of metadata is a
+	 * compiler error here instead of whatever the false arm happened to be. */
+	switch (which) {
+		case STRUCT_FIELD_NAMES:
+			return struct_tuple_or_empty(type->struct_field_names);
+		case STRUCT_DEFAULTS:
+			return struct_tuple_or_empty(type->struct_defaults);
+	}
+
+	Py_UNREACHABLE();
 }
 
 /* Access the PyMemberDef array that floats behind a heap type. Mirrors
