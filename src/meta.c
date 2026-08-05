@@ -91,7 +91,7 @@ static struct member_lookup find_member(
 
 PyTypeObject StructMeta_Type = {
 	PyVarObject_HEAD_INIT(NULL, 0)
-	.tp_name = "salix.StructMeta",
+	.tp_name = "salix._StructMeta",
 	.tp_basicsize = sizeof(StructType),
 	.tp_itemsize = sizeof(PyMemberDef),
 	.tp_flags = (
@@ -152,7 +152,7 @@ PyObject * StructMeta_new(
 	if (
 		!PyArg_ParseTuple(
 			args,
-			"UO!O!:StructMeta.__new__",
+			"UO!O!:_StructMeta.__new__",
 			&name,
 			&PyTuple_Type,
 			&bases,
@@ -172,8 +172,8 @@ PyObject * StructMeta_new(
 	if (base == NULL && !inherits_mixin(bases)) {
 		PyErr_SetString(
 			PyExc_TypeError,
-			"a struct class inherits salix.Struct; StructMeta is the metaclass of "
-			"one, not a way to make one"
+			"a struct class inherits salix.Struct; the metaclass of one is not a "
+			"way to make one"
 		);
 
 		return NULL;
@@ -250,7 +250,7 @@ PyObject * StructMeta_new(
  * bindings, the hash, the setattr that makes frozen mean something. Without it
  * in the MRO the class still builds, still constructs and still reports its
  * fields, and is a struct in every visible way except behaviour -- so a bare
- * `metaclass=StructMeta` is refused rather than answered with that.
+ * `metaclass=type(Struct)` is refused rather than answered with that.
  */
 static bool inherits_mixin(PyObject * const bases) {
 	for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(bases); ++i) {

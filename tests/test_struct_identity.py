@@ -1,10 +1,11 @@
 """What the struct machinery does when handed something that is not a struct.
 
-`_StructMixin` is a permitted base and `StructMeta` is exported, so both are
-reachable without `Struct` anywhere in the bases. Most of what is asserted here
-used to be a segfault or a class that reported its fields and behaved like
-`object`; `TestTheUninstalledClassCannotBeBuilt` is the exception, pinning a
-CPython guard that salix relies on and never crashed without.
+Neither the mixin nor the metaclass is exported, and both are one attribute
+lookup from `Struct`, so both are reachable without `Struct` anywhere in the
+bases. Most of what is asserted here used to be a segfault or a class that
+reported its fields and behaved like `object`;
+`TestTheUninstalledClassCannotBeBuilt` is the exception, pinning a CPython
+guard that salix relies on and never crashed without.
 
 The crashes cannot be asserted directly -- a segfault takes pytest with it -- so
 each one is pinned by the guarded outcome it now produces.
@@ -16,6 +17,7 @@ import salix
 from salix import Struct
 
 MIXIN = Struct.__mro__[1]
+META = type(Struct)
 
 
 class Point(Struct):
@@ -73,31 +75,39 @@ class TestAMixinSubclass:
 
 
 class TestTheMetaclassWithoutTheMixin:
+    def test_the_module_does_not_offer_it(self):
+        """#15: reaching the metaclass takes `type(Struct)`, which is what the
+        rest of this class does. What is gone is the invitation to.
+        """
+
+        assert not hasattr(salix, "StructMeta")
+        assert META.__name__ == "_StructMeta"
+
     def test_a_class_body_naming_it_is_refused(self):
         with pytest.raises(TypeError, match="a struct class inherits salix"):
 
-            class Bare(metaclass=salix.StructMeta):
+            class Bare(metaclass=META):
                 x: int
 
     def test_calling_it_with_no_bases_is_refused(self):
         with pytest.raises(TypeError, match="a struct class inherits salix"):
-            salix.StructMeta("Bare", (), {})
+            META("Bare", (), {})
 
     def test_a_co_base_that_is_not_a_struct_does_not_smuggle_one_through(self):
         with pytest.raises(TypeError, match="a struct class inherits salix"):
-            salix.StructMeta("Bare", (list,), {})
+            META("Bare", (list,), {})
 
     def test_calling_it_with_a_struct_base_still_works(self):
-        built = salix.StructMeta("Extended", (Point,), {"__annotations__": {"y": int}})
+        built = META("Extended", (Point,), {"__annotations__": {"y": int}})
 
         assert built.__struct_fields__ == ("x", "y")
         assert built(1, 2) == built(1, 2)
 
 
 class TestTheUninstalledClassCannotBeBuilt:
-    """`is_struct` asks the metaclass, so every StructMeta instance has to have
+    """`is_struct` asks the metaclass, so every instance of it has to have
     a field table. What guarantees it is CPython's own `tp_new_wrapper`: the
-    most derived non-heap base of the requested type is `StructMeta`, whose
+    most derived non-heap base of the requested type is the metaclass, whose
     `tp_new` is not `type`'s, so `type.__new__` refuses to build one.
 
     That guard is load-bearing and it is CPython's, not salix's, so these pin it
@@ -109,7 +119,7 @@ class TestTheUninstalledClassCannotBeBuilt:
 
     @staticmethod
     def metaclass_subclass_that_builds_with_type_new():
-        class Substituting(salix.StructMeta):
+        class Substituting(META):
             def __new__(mcls, *args, **keywords):
                 return type.__new__(mcls, *args, **keywords)
 
@@ -117,10 +127,10 @@ class TestTheUninstalledClassCannotBeBuilt:
 
     def test_type_new_refuses_the_metaclass(self):
         with pytest.raises(TypeError, match="is not safe"):
-            type.__new__(salix.StructMeta, "S", (Point,), {})
+            type.__new__(META, "S", (Point,), {})
 
     def test_type_new_refuses_a_metaclass_subclass(self):
-        class Inheriting(salix.StructMeta):
+        class Inheriting(META):
             pass
 
         with pytest.raises(TypeError, match="is not safe"):
@@ -146,7 +156,7 @@ class TestTheUninstalledClassCannotBeBuilt:
 
         import types
 
-        built = types.new_class("S", (Point,), {"metaclass": salix.StructMeta})
+        built = types.new_class("S", (Point,), {"metaclass": META})
 
         assert built.__struct_fields__ == ("x",)
         assert built(1) == built(1)
@@ -154,7 +164,7 @@ class TestTheUninstalledClassCannotBeBuilt:
 
 class TestAMetaclassSubclass:
     def test_one_that_delegates_produces_a_struct(self):
-        class Delegating(salix.StructMeta):
+        class Delegating(META):
             pass
 
         class Delegated(Struct, metaclass=Delegating):
@@ -168,13 +178,13 @@ class TestAMetaclassSubclass:
         here with no keywords at all and planned the class without them.
         """
 
-        class Delegating(salix.StructMeta):
+        class Delegating(META):
             pass
 
         class Base(Struct, metaclass=Delegating):
             x: int
 
-        built = salix.StructMeta("Built", (Base,), {"__annotations__": {"y": int}}, order=True)
+        built = META("Built", (Base,), {"__annotations__": {"y": int}}, order=True)
 
         assert built(1, 2) < built(1, 3)
         assert type(built) is Delegating
@@ -184,10 +194,10 @@ class TestAMetaclassSubclass:
         winner: type_new is handed the requested metatype and says so.
         """
 
-        class Left(salix.StructMeta):
+        class Left(META):
             pass
 
-        class Right(salix.StructMeta):
+        class Right(META):
             pass
 
         class FromLeft(Struct, metaclass=Left):
@@ -197,7 +207,7 @@ class TestAMetaclassSubclass:
             y: int
 
         with pytest.raises(TypeError, match="metaclass conflict"):
-            salix.StructMeta("Both", (FromLeft, FromRight), {})
+            META("Both", (FromLeft, FromRight), {})
 
     def test_a_default_survives_the_handoff_to_a_derived_metatype(self):
         """The re-entered call read the namespace after drop_class_variables had
@@ -205,14 +215,14 @@ class TestAMetaclassSubclass:
         was gone by the time it planned the fields.
         """
 
-        class Delegating(salix.StructMeta):
+        class Delegating(META):
             pass
 
         class Base(Struct, metaclass=Delegating):
             x: int
 
         namespace = {"__annotations__": {"y": int}, "y": 42}
-        built = salix.StructMeta("Built", (Base,), namespace)
+        built = META("Built", (Base,), namespace)
 
         assert built(1).y == 42
 
@@ -231,7 +241,7 @@ class TestAMetaclassSubclass:
 
         calls = []
 
-        class Wrong(salix.StructMeta):
+        class Wrong(META):
             def __new__(mcls, *args, **keywords):
                 calls.append(1)
 
@@ -244,4 +254,4 @@ class TestAMetaclassSubclass:
             a: int
 
         with pytest.raises(TypeError, match=r"Wrong\.__new__ returned .*is not a struct class"):
-            salix.StructMeta("Z", (Seeded,), {"__annotations__": {"b": int}})
+            META("Z", (Seeded,), {"__annotations__": {"b": int}})

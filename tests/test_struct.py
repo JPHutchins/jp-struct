@@ -10,7 +10,6 @@ Run with `uv run camas test` (or `python -m pytest`).
 
 import pytest
 
-import salix
 from salix import Struct
 
 
@@ -147,11 +146,10 @@ def test_empty_struct():
 
 
 def test_metaclass_identity():
-    assert type(Point2D) is salix.StructMeta
+    assert type(Point2D) is type(Struct)
     assert isinstance(Point2D(1.0, 2.0), Struct)
 
 
 def test_module_of_the_exported_names():
     assert Struct.__module__ == "salix"
-    assert salix.StructMeta.__module__ == "salix"
     assert Point2D.__module__ == __name__
