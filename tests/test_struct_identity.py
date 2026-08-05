@@ -336,6 +336,48 @@ class TestAMetaclassSubclass:
 
         assert built(1).y == 42
 
+    def test_a_delegate_that_writes_its_own_new_is_refused_not_mis_planned(self):
+        """The half of #55 that is answerable here: the class the delegate hands
+        back is checked against what this call planned, and a mismatch is an
+        error rather than a class that quietly is not the one asked for.
+
+        The class statement is not affected, and the test below this one says
+        so: there the winner is the requested metatype, so nothing is handed
+        off and the keywords and the body's defaults are still in hand.
+        """
+
+        class Forwarding(META):
+            def __new__(metacls, name, bases, namespace, **keywords):
+                return super().__new__(metacls, name, bases, namespace, **keywords)
+
+        class Base(Struct, metaclass=Forwarding):
+            x: int
+
+        namespace = {"__annotations__": {"y": int}, "y": 42}
+
+        with pytest.raises(TypeError, match="did not plan"):
+            META("Built", (Base,), namespace, order=True)
+
+    def test_the_class_statement_reaches_none_of_that(self):
+        """The hand-off only happens for an explicit metaclass call over a base
+        whose metatype wins. Written out, because the refusal above would be a
+        serious regression if it reached the ordinary spelling.
+        """
+
+        class Forwarding(META):
+            def __new__(metacls, name, bases, namespace, **keywords):
+                return super().__new__(metacls, name, bases, namespace, **keywords)
+
+        class Base(Struct, metaclass=Forwarding):
+            x: int
+
+        class Statement(Base, order=True):
+            y: int = 42
+
+        assert Statement.__struct_fields__ == ("x", "y")
+        assert Statement(1).y == 42
+        assert Statement(1) < Statement(1, 43)
+
     @pytest.mark.xfail(strict=True, reason="#55")
     def test_both_survive_a_delegate_that_writes_its_own_new(self):
         """What the two above do not cover. They pass because the winner's
@@ -344,6 +386,9 @@ class TestAMetaclassSubclass:
         __new__ -- even one that only forwards -- makes type_new hand the build
         to it instead, with no keywords and a namespace drop_class_variables has
         already taken the defaults out of.
+
+        Refused rather than mis-planned since the guard above, which is not the
+        same as fixed: what #55 wants is for this call to work.
         """
 
         class Forwarding(META):

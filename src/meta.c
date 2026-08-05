@@ -77,6 +77,11 @@ static enum result install_fields(
 	struct options options,
 	bool resolves_body_eq
 );
+static enum result reject_unless_planned(
+	StructType const * struct_class,
+	struct field_plan const * plan,
+	struct options options
+);
 static enum result install_post_init(StructType * struct_class);
 static bool defines_own_init(StructType const * struct_class);
 static PyObject * StructMeta_call(PyObject * self, PyObject * args, PyObject * keywords);
@@ -259,20 +264,23 @@ static PyObject * build_struct_class(
 	 * longer comes back here already installed. What still can is a metaclass
 	 * __new__ that returned a struct class -- possibly one it did not just make,
 	 * whose slot offsets belong to a layout this plan knows nothing about.
-	 * Installing over that is a field table pointed at the wrong memory. */
-	if (
-		struct_class != NULL &&
-		struct_class->struct_field_names == NULL &&
-		install_fields(
+	 * Installing over that is a field table pointed at the wrong memory, so the
+	 * class it did build is held to what this call planned instead. */
+	if (struct_class != NULL) {
+		enum result const settled = (
+			struct_class->struct_field_names == NULL ? install_fields(
 				struct_class,
 				base,
 				&plan,
 				request.options,
 				body_defines_eq || inherits_body_eq
-			) !=
-			RESULT_OK
-	) {
-		Py_CLEAR(struct_class);
+			) :
+			reject_unless_planned(struct_class, &plan, request.options)
+		);
+
+		if (settled != RESULT_OK) {
+			Py_CLEAR(struct_class);
+		}
 	}
 
 	field_plan_clear(&plan);
@@ -590,6 +598,57 @@ static PyTypeObject * winning_metatype(PyTypeObject * const requested, PyObject 
 	}
 
 	return winner;
+}
+
+/*
+ * The class came back already a struct, which means something other than this
+ * call built it. A metaclass __new__ written in Python is one such thing: it is
+ * re-entered through type_new with no keywords and a namespace the transform
+ * has already taken the body defaults out of, so the class it installs is
+ * planned from less than this call was handed. The options and the defaults are
+ * where that shows.
+ *
+ * Refused rather than returned, and rather than installed over: the field table
+ * this call planned describes a layout that class may not have. #55 is where
+ * the hand-off itself is argued -- until it forwards what it was given, a
+ * caller gets an error instead of a class that quietly is not the one asked
+ * for.
+ */
+static enum result reject_unless_planned(
+	StructType const * const struct_class,
+	struct field_plan const * const plan,
+	struct options const options
+) {
+	PY_OWNED(planned, PyList_AsTuple(plan->all_names));
+
+	if (planned == NULL) {
+		return RESULT_ERROR;
+	}
+
+	int const same_fields =
+		PyObject_RichCompareBool(struct_class->struct_field_names, planned, Py_EQ);
+
+	if (same_fields < 0) {
+		return RESULT_ERROR;
+	}
+
+	if (
+		same_fields == 1 &&
+		struct_class->struct_default_count == PyTuple_GET_SIZE(plan->defaults) &&
+		options_agree(struct_class->struct_options, options)
+	) {
+		return RESULT_OK;
+	}
+
+	PyErr_Format(
+		PyExc_TypeError,
+		"%.200s.__new__ returned a struct class this call did not plan: its "
+		"metaclass is re-entered without the keywords or the class body's "
+		"defaults, so what it built is not what was asked for",
+		Py_TYPE(struct_class)->tp_name
+	);
+
+	return RESULT_ERROR;
 }
 
 /* The type exists but is not yet a struct; this is what makes it one. */
