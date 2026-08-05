@@ -615,3 +615,72 @@ class TestAHostileNameAttribute:
             type(Struct)("H", (Struct,), {"__annotate__": self.raising(Hostile("x"))})
 
         assert isinstance(raised.value.__context__, RuntimeError)
+
+
+@pytest.mark.skipif(sys.version_info < (3, 14), reason="no escalation before 3.14")
+class TestAHostileSuppressionFlag:
+    """`__suppress_context__` has no C accessor, so reading it runs the
+    attribute protocol on the same author-written class. It gets the same rule
+    the `.name` lookup gets, rather than a quieter one of its own.
+    """
+
+    @staticmethod
+    def raising(error, monkeypatch):
+        monkeypatch.setitem(sys.modules, "annotationlib", None)
+
+        def annotate(format):
+            if format == 1:
+                raise error
+
+            return {"x": int}
+
+        return annotate
+
+    def test_an_exit_while_reading_the_flag_wins(self, monkeypatch):
+        class Hostile(NameError):
+            def __getattribute__(self, attribute):
+                if attribute == "__suppress_context__":
+                    raise KeyboardInterrupt
+
+                return super().__getattribute__(attribute)
+
+        error = Hostile("nope", name="Missing")
+
+        with pytest.raises(KeyboardInterrupt) as raised:
+            type(Struct)("H", (Struct,), {"__annotate__": self.raising(error, monkeypatch)})
+
+        assert isinstance(raised.value.__context__, Hostile)
+
+    def test_an_ordinary_failure_while_reading_the_flag_is_dropped(self, monkeypatch):
+        """It is a failure to read a flag on the way to reporting something
+        that matters more, so the name is raised and nothing goes behind it.
+        """
+
+        class Hostile(NameError):
+            def __getattribute__(self, attribute):
+                if attribute == "__suppress_context__":
+                    raise RuntimeError("looking hurt")
+
+                return super().__getattribute__(attribute)
+
+        error = Hostile("nope", name="Missing")
+
+        with pytest.raises(Hostile) as raised:
+            type(Struct)("H", (Struct,), {"__annotate__": self.raising(error, monkeypatch)})
+
+        assert raised.value.__context__ is None
+
+    def test_a_truthy_flag_counts_the_way_the_interpreter_counts_it(self, monkeypatch):
+        """CPython's traceback printer asks the flag for its truth, not for
+        identity with True, so a shadowed truthy value means the same here.
+        """
+
+        class Hostile(NameError):
+            __suppress_context__ = 1
+
+        error = Hostile("nope", name="Missing")
+
+        with pytest.raises(Hostile) as raised:
+            type(Struct)("H", (Struct,), {"__annotate__": self.raising(error, monkeypatch)})
+
+        assert raised.value.__context__ is None
