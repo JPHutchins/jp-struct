@@ -257,7 +257,7 @@ class TestMutableDefaults:
 
         value = NON_EMPTY[factory]
 
-        with pytest.raises(TypeError, match="non-empty"):
+        with pytest.raises(TypeError, match=f"non-empty {factory.__name__}"):
 
             class Holder(Struct):
                 v: object = value
@@ -290,29 +290,6 @@ class TestMutableDefaults:
 
         assert Holder().v is Holder().v
         assert Holder.__struct_defaults__[0] is value
-
-    def test_a_set_default_is_refused_before_its_elements_are_hashed(self):
-        """Copying a set hashes every element, so copying before refusing would
-        run user code at class definition on the way to an error -- and let an
-        element's exception replace the TypeError the refusal promises.
-        """
-
-        hashed = []
-
-        class Counts:
-            def __hash__(self) -> int:
-                hashed.append(1)
-                return 0
-
-        contents = {Counts()}
-        hashed.clear()  # building the set literal hashed it once, before salix
-
-        with pytest.raises(TypeError, match="non-empty set"):
-
-            class Holder(Struct):
-                v: object = contents
-
-        assert hashed == []
 
     def test_a_body_init_does_not_exempt_the_declared_default(self):
         """Its constructor never reads the default, so nothing is shared -- but

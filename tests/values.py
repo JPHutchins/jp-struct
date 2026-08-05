@@ -133,7 +133,9 @@ def _unhashable() -> tuple[object, ...]:
         [1, 2],
         {},
         {"key": "value"},
+        set(),
         {1, 2},
+        bytearray(),
         bytearray(b"bytes"),
         array.array("i", [1, 2]),
         memoryview(bytearray(b"bytes")),
@@ -144,6 +146,15 @@ def _unhashable() -> tuple[object, ...]:
 HASHABLE = _hashable()
 UNHASHABLE = _unhashable()
 EVERY = HASHABLE + UNHASHABLE
+
+# Both halves of the rule are reached by parametrizing over these, so each of
+# the four needs an empty instance and a non-empty one. set and bytearray had
+# only the non-empty one, which left the copy -- and with it the severing that
+# class creation does -- asserted for list and dict alone.
+assert all(
+    {not value for value in UNHASHABLE if type(value) is kind} == {True, False}
+    for kind in COPIED_WHEN_EMPTY
+)
 
 
 def identify(value: object) -> str:

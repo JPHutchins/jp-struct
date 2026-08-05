@@ -265,12 +265,13 @@ static PyObject * build_defaults(PyObject * const all_names, PyObject * const de
 		PyObject * const field_name = PyList_GET_ITEM(all_names, i);
 		PyObject * const value = PyDict_GetItem(default_by_name, field_name);
 
-		/* Twice, on purpose. The first read is of an object the module still
-		 * holds, so it decides nothing -- but it is O(1), and it keeps a default
-		 * that is going to be refused from being built into a copy that is then
-		 * thrown away. (An earlier comment here said copying a set hashes every
-		 * element. It does not: PySet_New copies the table, and `set(s)` calls
-		 * __hash__ zero times.)
+		/* Twice, on purpose. The first read is what raises in the ordinary case,
+		 * but its verdict is not final: it reads an object the module still
+		 * holds and can still write to between the two checks. It earns its
+		 * place by being O(1) and keeping a default that is going to be refused
+		 * from being built into a copy that is then thrown away -- that copy is
+		 * the whole of what it saves, since copying a set hashes nothing
+		 * (PySet_New copies the table).
 		 *
 		 * The second read is the one that counts, because it reads the copy --
 		 * what the class keeps, and what no module-level alias still points at.
