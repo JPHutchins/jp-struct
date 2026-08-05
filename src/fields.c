@@ -13,6 +13,15 @@ struct special_form {
 	char const * instead;
 };
 
+/* What the two paths match an annotation against. Built once per class, because
+ * the text path's needles are the same two words for every field in it. */
+struct form_probes {
+	PyObject * class_var;
+	PyObject * init_var;
+	PyObject * class_var_name;
+	PyObject * init_var_name;
+};
+
 enum inheritance : int {
 	INHERITANCE_ERROR = -1,
 	INHERITANCE_NEW = 0,
@@ -32,16 +41,28 @@ static enum result append_declared(
 	PyObject * new_names,
 	PyObject * default_by_name
 );
+
+/* Both paths answer the same question and owe the user the same sentence, so
+ * the answers live here rather than once per path -- and the text path's
+ * needles are built from these names, so each form is spelled once. */
+static struct special_form const CLASS_VAR_FORM = {
+	.name = "ClassVar",
+	.instead = "write it below the fields, without an annotation",
+};
+static struct special_form const INIT_VAR_FORM = {
+	.name = "InitVar",
+	.instead = "take the value in a custom __init__ and write the fields with set_field",
+};
 static PyObject * build_defaults(PyObject * all_names, PyObject * default_by_name);
 static PyObject * checked_annotations(PyObject * namespace);
 static enum inheritance inherits_field(StructType const * base, PyObject * field_name);
 static struct special_form special_form_of(
 	PyObject * annotation,
-	PyObject * class_var,
-	PyObject * init_var
+	struct form_probes const * probes
 );
-static struct special_form named_special_form(PyObject * text);
-static bool names_form(PyObject * text, char const * form);
+static struct special_form named_special_form(PyObject * text, struct form_probes const * probes);
+static bool annotates_with_text(PyObject * annotations);
+static bool names_form(PyObject * text, PyObject * needle);
 static bool continues_identifier(Py_UCS4 character);
 static PyObject * module_attribute(char const * module_name, char const * attribute);
 
@@ -145,7 +166,7 @@ static enum result append_declared(
 	Py_ssize_t position = 0;
 
 	/* A class with no annotations of its own declares no fields and so can name
-	 * no forms; the two probes below are the whole cost of asking. */
+	 * no forms; the four probes below are the whole cost of asking. */
 	if (PyDict_GET_SIZE(annotations) == 0) {
 		return RESULT_OK;
 	}
@@ -166,6 +187,29 @@ static enum result append_declared(
 	if (init_var == NULL && PyErr_Occurred()) {
 		return RESULT_ERROR;
 	}
+
+	/* From the same two strings the refusal quotes, so there is one spelling of
+	 * each form in the file. Built here and not in the matcher, which runs per
+	 * field and per form -- and only for a class that has text to match, since
+	 * building them for every class taxes the ones that never look. */
+	PY_MOVABLE(class_var_name, NULL);
+	PY_MOVABLE(init_var_name, NULL);
+
+	if (annotates_with_text(annotations)) {
+		class_var_name = PyUnicode_FromString(CLASS_VAR_FORM.name);
+		init_var_name = PyUnicode_FromString(INIT_VAR_FORM.name);
+
+		if (class_var_name == NULL || init_var_name == NULL) {
+			return RESULT_ERROR;
+		}
+	}
+
+	struct form_probes const probes = {
+		.class_var = class_var,
+		.init_var = init_var,
+		.class_var_name = class_var_name,
+		.init_var_name = init_var_name,
+	};
 
 	while (PyDict_Next(annotations, &position, &field_name, &annotation)) {
 		if (!PyUnicode_CheckExact(field_name)) {
@@ -197,7 +241,7 @@ static enum result append_declared(
 
 		/* After the inheritance check, so re-annotating an inherited field is
 		 * the no-op it has always been rather than a new refusal. */
-		struct special_form const special = special_form_of(annotation, class_var, init_var);
+		struct special_form const special = special_form_of(annotation, &probes);
 
 		/* Before the answer is used at all, not only when it is "no form": the
 		 * text path allocates on the way to either verdict, and a failure there
@@ -264,25 +308,16 @@ enum : int {
 	SPECIAL_FORM_HOPS = 4,
 };
 
-/* Both paths answer the same question and owe the user the same sentence, so
- * the answers live here rather than once per path. */
-static struct special_form const CLASS_VAR_FORM = {
-	.name = "ClassVar",
-	.instead = "write it below the fields, without an annotation",
-};
-static struct special_form const INIT_VAR_FORM = {
-	.name = "InitVar",
-	.instead = "take the value in a custom __init__ and write the fields with set_field",
-};
-
 static struct special_form special_form_of(
 	PyObject * const annotation,
-	PyObject * const class_var,
-	PyObject * const init_var
+	struct form_probes const * const probes
 ) {
 	if (PyUnicode_Check(annotation)) {
-		return named_special_form(annotation);
+		return named_special_form(annotation, probes);
 	}
+
+	PyObject * const class_var = probes->class_var;
+	PyObject * const init_var = probes->init_var;
 
 	/* Neither module is loaded, so nothing reachable from here can be either
 	 * form and the walk below can only ask __origin__ of things for nothing. */
@@ -344,12 +379,32 @@ static struct special_form special_form_of(
  * before any of this. dataclasses guesses at those against sys.modules; this
  * does not.
  */
-static struct special_form named_special_form(PyObject * const text) {
-	if (names_form(text, "ClassVar")) {
+/* The same question the matcher asks per field, asked once for the class: is
+ * there any text here at all? Under `from __future__ import annotations` every
+ * annotation is, and otherwise almost none are. */
+static bool annotates_with_text(PyObject * const annotations) {
+	PyObject * field_name;
+	PyObject * annotation;
+	Py_ssize_t position = 0;
+
+	while (PyDict_Next(annotations, &position, &field_name, &annotation)) {
+		if (PyUnicode_Check(annotation)) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
+static struct special_form named_special_form(
+	PyObject * const text,
+	struct form_probes const * const probes
+) {
+	if (names_form(text, probes->class_var_name)) {
 		return CLASS_VAR_FORM;
 	}
 
-	if (names_form(text, "InitVar")) {
+	if (names_form(text, probes->init_var_name)) {
 		return INIT_VAR_FORM;
 	}
 
@@ -405,13 +460,7 @@ static bool continues_identifier(Py_UCS4 const character) {
 	return PyUnicode_IsIdentifier(probe) == 1;
 }
 
-static bool names_form(PyObject * const text, char const * const form) {
-	PY_OWNED(needle, PyUnicode_FromString(form));
-
-	if (needle == NULL) {
-		return false;
-	}
-
+static bool names_form(PyObject * const text, PyObject * const needle) {
 	Py_ssize_t const length = PyUnicode_GET_LENGTH(text);
 	Py_ssize_t const form_length = PyUnicode_GET_LENGTH(needle);
 
