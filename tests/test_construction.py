@@ -1,7 +1,7 @@
 """Argument binding: what reaches a slot, and what is rejected."""
 
 import pytest
-from values import COPIED_WHEN_EMPTY
+from values import COPIED_WHEN_EMPTY, NON_EMPTY
 
 from salix import Struct
 
@@ -139,12 +139,18 @@ class TestMutableDefaults:
         """`list` has its own test above; these are the rest of the four that
         `struct_copies_default` names, taken from that list rather than named
         again -- adding a type to values.py brings a case here with it.
+
+        The type is asserted as well as the distinctness, because each of these
+        is copied by its own constructor and a wrong one would answer with a
+        distinct object of the wrong type -- which the `is not` alone accepts.
         """
 
         class Holder(Struct):
             v: object = factory()
 
         assert Holder().v is not Holder().v
+        assert type(Holder().v) is factory
+        assert Holder().v == factory()
 
     def test_an_immutable_default_is_shared(self):
         """Sharing holds. That is the whole of what this can say, and the
@@ -238,8 +244,19 @@ class TestMutableDefaults:
             class Nested(Struct):
                 xs: list = [[1]]  # noqa: RUF012 -- the refusal is the assertion
 
-    @pytest.mark.parametrize("value", [{"k": 1}, {1, 2}, bytearray(b"x")])
-    def test_every_non_empty_builtin_is_refused(self, value):
+    @pytest.mark.parametrize(
+        "factory",
+        [kind for kind in COPIED_WHEN_EMPTY if kind is not list],
+        ids=lambda factory: factory.__name__,
+    )
+    def test_every_non_empty_builtin_is_refused(self, factory):
+        """Derived from the same list the copying is, so a type added there
+        arrives here refused as well as copied -- the two halves of the rule
+        that have to agree.
+        """
+
+        value = NON_EMPTY[factory]
+
         with pytest.raises(TypeError, match="non-empty"):
 
             class Holder(Struct):

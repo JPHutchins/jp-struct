@@ -22,6 +22,17 @@ from salix import Struct
 # the suite keeps.
 COPIED_WHEN_EMPTY = (list, dict, set, bytearray)
 
+# A non-empty instance of each, for the half of the rule that refuses rather
+# than copies. The types come from the tuple above; only the contents are
+# spelled here, because no one seed constructs all four -- dict wants pairs and
+# bytearray wants small ints. The assertion is what keeps the two from drifting.
+NON_EMPTY = {list: [1], dict: {"k": 1}, set: {1}, bytearray: bytearray(b"x")}
+
+# The first caught nothing and the second caught `b"x"`, which is a bytes and so
+# is not refused at all -- the seed has to be an instance of its own key.
+assert set(NON_EMPTY) == set(COPIED_WHEN_EMPTY)
+assert all(type(value) is kind and len(value) > 0 for kind, value in NON_EMPTY.items())
+
 
 class Colour(enum.Enum):
     RED = 1

@@ -14,11 +14,15 @@ PyObject * Struct_vectorcall(
 PyObject * Struct_set_field(PyObject * module, PyObject * arguments);
 
 /*
- * The four exact builtins that spell "container I will mutate". Copying and
- * refusing have to agree about which types these are: a type copied but not
+ * The four exact builtins that spell "container I will mutate", as the refusal
+ * sees them. Copying names them a second time, in struct_default_copy, because
+ * each one needs its own constructor and no predicate can supply that.
+ *
+ * The two lists have to agree and nothing makes them: a type copied but not
  * refused gets shallow-copied while non-empty, and a type refused but not
  * copied has its emptiness checked on the caller's object rather than on a
- * private one. Stated once so the two cannot drift.
+ * private one. A type added here and not there is shared, which is the
+ * direction that degrades safely; the other way round changes a value's type.
  */
 static inline bool struct_copies_default(PyTypeObject const * const kind) {
 	return (

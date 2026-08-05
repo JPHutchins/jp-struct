@@ -236,10 +236,6 @@ static enum result fill_defaults(
 PyObject * struct_default_copy(PyObject * const declared) {
 	PyTypeObject * const kind = Py_TYPE(declared);
 
-	if (!struct_copies_default(kind)) {
-		return Py_NewRef(declared);
-	}
-
 	if (kind == &PyList_Type) {
 		return PyList_GetSlice(declared, 0, PyList_GET_SIZE(declared));
 	}
@@ -256,9 +252,8 @@ PyObject * struct_default_copy(PyObject * const declared) {
 		return PyByteArray_FromObject(declared);
 	}
 
-	/* Unreachable while struct_copies_default names these four and no more. If
-	 * that stops being true, sharing is the answer that degrades: copying with
-	 * the wrong constructor would change the value's type. */
+	/* Everything else, which is the answer that degrades safely: copying with a
+	 * constructor for the wrong type would change the value. */
 	return Py_NewRef(declared);
 }
 

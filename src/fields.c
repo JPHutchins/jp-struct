@@ -267,9 +267,10 @@ static PyObject * build_defaults(PyObject * const all_names, PyObject * const de
 
 		/* Twice, on purpose. The first read is of an object the module still
 		 * holds, so it decides nothing -- but it is O(1), and it keeps a default
-		 * that is going to be refused from being copied first. That matters for
-		 * a set, whose copy hashes every element, which is user code running at
-		 * class definition on the way to an error.
+		 * that is going to be refused from being built into a copy that is then
+		 * thrown away. (An earlier comment here said copying a set hashes every
+		 * element. It does not: PySet_New copies the table, and `set(s)` calls
+		 * __hash__ zero times.)
 		 *
 		 * The second read is the one that counts, because it reads the copy --
 		 * what the class keeps, and what no module-level alias still points at.
