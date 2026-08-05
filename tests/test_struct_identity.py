@@ -11,6 +11,8 @@ The crashes cannot be asserted directly -- a segfault takes pytest with it -- so
 each one is pinned by the guarded outcome it now produces.
 """
 
+import collections.abc
+
 import pytest
 
 import salix
@@ -62,6 +64,21 @@ class TestAMixinSubclass:
 
         with pytest.raises(TypeError, match="unhashable type: 'Impostor'"):
             hash(impostor)
+
+    def test_it_is_an_instance_of_Hashable_all_the_same(self, impostor):
+        """The ABC asks whether tp_hash is non-NULL rather than calling it, and
+        the mixin's is -- the slot every struct hashes through. So the operator
+        and `isinstance` disagree, which is what a writable memoryview does too.
+        """
+
+        assert isinstance(impostor, collections.abc.Hashable)
+
+        view = memoryview(bytearray(b"ab"))
+
+        assert isinstance(view, collections.abc.Hashable)
+
+        with pytest.raises(ValueError, match="cannot hash writable memoryview"):
+            hash(view)
 
     def test_equality_between_two_of_them_is_intransitive(self):
         """A consequence of the fallback policy rather than a decision of its
@@ -168,6 +185,28 @@ class TestTheMetaclassWithoutTheMixin:
 
         assert built.__struct_fields__ == ("x", "y")
         assert built(1, 2) == built(1, 2)
+
+    @pytest.mark.parametrize("attribute", ["__struct_fields__", "__struct_defaults__"])
+    def test_its_own_metadata_getters_are_never_handed_the_metaclass(self, attribute):
+        """They read fields that live past the end of a PyTypeObject, so what
+        they are handed has to be an instance of the metaclass -- sized by its
+        basicsize -- and never the metaclass itself, which is an instance of
+        `type` and shorter by the difference the third assertion names.
+
+        Two things keep it that way, and neither is salix's: `type(META)` is
+        `type`, so an attribute lookup on META finds the descriptor and returns
+        it unread, and the descriptor refuses any other object outright.
+        """
+
+        descriptor = META.__dict__[attribute]
+
+        assert type(META) is type
+        assert getattr(META, attribute) is descriptor
+        assert META.__basicsize__ > type.__basicsize__
+
+        for wrong in (META, type, int, object()):
+            with pytest.raises(TypeError, match="doesn't apply to"):
+                descriptor.__get__(wrong)
 
 
 def metaclass_subclass_that_builds_with_type_new():
@@ -296,6 +335,29 @@ class TestAMetaclassSubclass:
         built = META("Built", (Base,), namespace)
 
         assert built(1).y == 42
+
+    @pytest.mark.xfail(strict=True, reason="#55")
+    def test_both_survive_a_delegate_that_writes_its_own_new(self):
+        """What the two above do not cover. They pass because the winner's
+        tp_new is StructMeta_new, so create_class builds as the winner and the
+        keywords and the untransformed namespace are still in hand. A Python
+        __new__ -- even one that only forwards -- makes type_new hand the build
+        to it instead, with no keywords and a namespace drop_class_variables has
+        already taken the defaults out of.
+        """
+
+        class Forwarding(META):
+            def __new__(metacls, name, bases, namespace, **keywords):
+                return super().__new__(metacls, name, bases, namespace, **keywords)
+
+        class Base(Struct, metaclass=Forwarding):
+            x: int
+
+        namespace = {"__annotations__": {"y": int}, "y": 42}
+        built = META("Built", (Base,), namespace, order=True)
+
+        assert built(1).y == 42
+        assert built(1) < built(1, 43)
 
     @pytest.mark.parametrize("produced", ["not a type", bytearray(8192), 0])
     def test_one_that_returns_a_non_type_is_refused(self, produced):

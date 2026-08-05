@@ -24,7 +24,13 @@ Py_hash_t Struct_hash(PyObject * const self) {
 	 * NotImplemented and the co-base's reflected __eq__ says yes -- so an
 	 * identity hash made it equal to a value it could not be looked up beside.
 	 * Refusing to hash is what puts equality and hashing back in one place, and
-	 * being unhashable is an ordinary thing for an object to be. #66. */
+	 * being unhashable is an ordinary thing for an object to be. #66.
+	 *
+	 * Unhashable to the operator and not to the ABC: collections.abc.Hashable
+	 * asks whether tp_hash is non-NULL, and the mixin's is, so an impostor is an
+	 * instance of it and raises when hashed. Setting tp_hash to NULL is not
+	 * available -- it is the same slot every struct hashes through. CPython's
+	 * own writable memoryview diverges the same way. */
 	if (!is_struct(self)) {
 		PyErr_Format(PyExc_TypeError, "unhashable type: '%.200s'", Py_TYPE(self)->tp_name);
 

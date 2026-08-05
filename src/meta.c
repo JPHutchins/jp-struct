@@ -572,10 +572,11 @@ static StructType * create_class(
  * one, which is why the loop can stay this simple.
  *
  * It is the third walk of `bases` in a class creation, after find_struct_base
- * and _PyType_CalculateMetaclass. Measured rather than assumed: replacing the
- * body with `return requested` moves class creation from 9.77-9.87 to
- * 9.77-9.87 us for a 16-field class, which is to say it does not move it. The
- * walk is one Py_TYPE and one PyType_IsSubtype per base, and a class has one.
+ * and _PyType_CalculateMetaclass. Measured, and smaller than the measurement:
+ * replacing the body with `return requested` leaves class creation at 9.77-9.87
+ * us for a 16-field class either way, so the walk is bounded by the width of
+ * that band rather than shown to be free. It is one Py_TYPE and one
+ * PyType_IsSubtype per base, and a class has one.
  */
 static PyTypeObject * winning_metatype(PyTypeObject * const requested, PyObject * const bases) {
 	PyTypeObject * winner = requested;
