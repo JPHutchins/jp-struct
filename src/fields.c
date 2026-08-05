@@ -62,6 +62,7 @@ static struct special_form special_form_of(
 );
 static struct special_form form_within(PyObject * annotation, struct form_probes const * probes);
 static PyObject * optional_attribute(PyObject * object, char const * name);
+static PyObject * dict_value_ref(PyObject * mapping, PyObject * key);
 static struct special_form named_special_form(PyObject * text, struct form_probes const * probes);
 static bool names_form(PyObject * text, PyObject * needle);
 static bool continues_identifier(Py_UCS4 character);
@@ -218,9 +219,13 @@ static enum result append_declared(
 
 		/* Held, because a later annotation's `__getattr__` may have deleted this
 		 * one between the snapshot and here -- and gone is not a field. */
-		PY_OWNED(annotation, Py_XNewRef(PyDict_GetItem(annotations, field_name)));
+		PY_OWNED(annotation, dict_value_ref(annotations, field_name));
 
 		if (annotation == NULL) {
+			if (PyErr_Occurred()) {
+				return RESULT_ERROR;
+			}
+
 			continue;
 		}
 
@@ -466,6 +471,28 @@ static struct special_form form_within(
 	}
 
 	return (struct special_form){0};
+}
+
+/*
+ * A strong reference to the value, or NULL if the key is gone.
+ *
+ * PyDict_GetItem hands back a borrowed one, and taking a reference to it is two
+ * steps: on a free-threaded build another thread can remove the key and drop
+ * the last reference in between. PyDict_GetItemRef takes it under the dict's
+ * own lock instead -- 3.13+, which is also every version that can have the
+ * race, so the older branch is the plain read it always was.
+ *
+ * It also reports a failed lookup rather than swallowing it, which is why the
+ * caller separates "gone" from "could not tell".
+ */
+static PyObject * dict_value_ref(PyObject * const mapping, PyObject * const key) {
+#if PY_VERSION_HEX >= 0x030D0000
+	PyObject * value = NULL;
+
+	return PyDict_GetItemRef(mapping, key, &value) < 0 ? NULL : value;
+#else
+	return Py_XNewRef(PyDict_GetItem(mapping, key));
+#endif
 }
 
 /* The attribute if it is there, and NULL if it is not. NULL with an exception
