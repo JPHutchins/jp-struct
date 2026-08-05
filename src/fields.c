@@ -331,17 +331,18 @@ static enum inheritance inherits_field(StructType const * const base, PyObject *
  * positional argument and checked code and running code disagree about what it
  * means. Refused instead, until there is a way to ask for them.
  *
- * The __origin__ chain is walked rather than probed once, because
+ * The annotation is walked rather than probed once, because
  * Annotated[ClassVar[int], ...] reaches ClassVar two hops down and is otherwise
- * the same bug wearing a wrapper. Bounded, so a self-referential __origin__
- * cannot spin here.
+ * the same bug wearing a wrapper. A tree since #57's ruling and not a chain:
+ * __origin__, every element of __args__, and a PEP 695 alias's __value__ are
+ * all edges.
  */
 enum : int {
-	/* A budget on work rather than on depth. The walk is a tree since #57's
-	 * ruling, and bounding the shape no longer bounds the effort: four hops was
-	 * enough for a chain -- Optional[Annotated[ClassVar[int], 'm']] is four --
-	 * and this is enough for the arguments beside them, while a
-	 * self-referential __origin__ still costs a fixed amount. */
+	/* A budget on work rather than on depth, because bounding the shape stopped
+	 * bounding the effort when the walk became a tree. Four hops was enough for
+	 * a chain -- Optional[Annotated[ClassVar[int], 'm']] is four -- and this is
+	 * enough for the arguments beside them. It is also what stops a cycle:
+	 * whichever edge points back at an ancestor, the frontier runs out. */
 	SPECIAL_FORM_NODES = 32,
 };
 
@@ -534,11 +535,16 @@ static struct special_form named_special_form(
 		return CLASS_VAR_FORM;
 	}
 
-	if (names_form(text, probes->init_var_name)) {
-		return INIT_VAR_FORM;
+	/* A scan can fail rather than answer -- PyUnicode_Find's own -2, or an
+	 * allocation in the boundary check -- and both spell that as false. The
+	 * second scan must not run on top of the first one's exception, and the
+	 * caller reads the exception before it reads the verdict, so leaving it set
+	 * is what reports the failure. */
+	if (PyErr_Occurred()) {
+		return (struct special_form){0};
 	}
 
-	return (struct special_form){0};
+	return names_form(text, probes->init_var_name) ? INIT_VAR_FORM : (struct special_form){0};
 }
 
 /*
@@ -597,6 +603,9 @@ static bool names_form(PyObject * const text, PyObject * const needle) {
 	for (Py_ssize_t at = 0; at + form_length <= length; ++at) {
 		Py_ssize_t const found = PyUnicode_Find(text, needle, at, length, 1);
 
+		/* -1 is "not in the text" and -2 is "could not look", and this answers
+		 * both with false: the caller tells them apart by the exception, which
+		 * it reads before it reads the verdict. */
 		if (found < 0) {
 			return false;
 		}
