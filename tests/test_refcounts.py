@@ -110,6 +110,76 @@ def test_an_uncopied_default_is_shared_by_every_instance():
     assert sys.getrefcount(sentinel) == before
 
 
+def test_a_body_init_shares_an_uncopied_default_the_same_way():
+    """tp_new writes the defaults for a class that declined the vectorcall, so
+    the two paths are counted separately -- one taking a reference per instance
+    is not evidence about the other.
+    """
+
+    class Declining(Struct, frozen=False):
+        optional: object = Sentinel()
+
+        def __init__(self) -> None:
+            pass
+
+    (sentinel,) = Declining.__struct_defaults__
+    before = sys.getrefcount(sentinel)
+    instances = [Declining() for _ in range(10)]
+
+    assert sys.getrefcount(sentinel) == before + 10
+
+    del instances
+
+    assert sys.getrefcount(sentinel) == before
+
+
+def test_a_body_init_copies_a_mutable_default_without_retaining_it():
+    class Declining(Struct, frozen=False):
+        xs: list = []  # noqa: RUF012 -- the copy is what is being counted
+
+        def __init__(self) -> None:
+            pass
+
+    (stored,) = Declining.__struct_defaults__
+    before = sys.getrefcount(stored)
+    instances = [Declining() for _ in range(10)]
+
+    assert sys.getrefcount(stored) == before
+    assert len({id(instance.xs) for instance in instances}) == 10
+
+    del instances
+    gc.collect()
+
+    assert sys.getrefcount(stored) == before
+
+
+def test_a_body_init_that_raises_releases_the_defaults_tp_new_wrote():
+    class Failing(Struct, frozen=False):
+        optional: object = Sentinel()
+
+        def __init__(self) -> None:
+            raise ValueError
+
+    (sentinel,) = Failing.__struct_defaults__
+    before = sys.getrefcount(sentinel)
+
+    for _ in range(10):
+        with pytest.raises(ValueError):
+            Failing()
+
+    assert sys.getrefcount(sentinel) == before
+
+    # Without this the test is vacuously green on a build whose tp_new writes
+    # nothing: no reference taken is no reference to leak.
+    class Writing(Struct, frozen=False):
+        optional: object = Sentinel()
+
+        def __init__(self) -> None:
+            pass
+
+    assert Writing().optional is Writing.__struct_defaults__[0]
+
+
 def test_reading_a_field_does_not_accumulate():
     sentinel = Sentinel()
     pair = Pair(sentinel, None)

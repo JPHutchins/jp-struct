@@ -10,6 +10,12 @@ PyObject * Struct_vectorcall(
 	PyObject * keyword_names
 );
 
+/*
+ * What a class whose body writes __init__ allocates with, in place of
+ * PyType_GenericNew -- see construct.c.
+ */
+PyObject * Struct_new(PyTypeObject * struct_class, PyObject * arguments, PyObject * keywords);
+
 /* salix.set_field(instance, name, value) -- see construct.c. */
 PyObject * Struct_set_field(PyObject * module, PyObject * arguments);
 
