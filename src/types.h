@@ -94,6 +94,19 @@ static inline PyObject * * struct_slot(
  * the interpreter links into a per-thread stack; no function can open one and
  * return with it still open. Same reason owned.h is macros.
  */
+/* A class's own dict, as a strong reference either way. PyType_GetDict arrived
+ * in 3.12; before it, tp_dict is the same object and the caller owns nothing,
+ * so a reference is taken to make the two spellings interchangeable. */
+#if PY_VERSION_HEX < 0x030C0000
+static inline PyObject * struct_type_dict(PyTypeObject * const type) {
+	return Py_XNewRef(type->tp_dict);
+}
+#else
+static inline PyObject * struct_type_dict(PyTypeObject * const type) {
+	return PyType_GetDict(type);
+}
+#endif
+
 #if PY_VERSION_HEX < 0x030D0000
 #	define STRUCT_BEGIN_CRITICAL_SECTION(object) {
 #	define STRUCT_END_CRITICAL_SECTION() }
