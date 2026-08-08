@@ -17,6 +17,7 @@ import dataclasses
 import functools
 import struct as struct_module
 import sys
+import weakref
 from typing import NamedTuple
 
 import pytest
@@ -489,16 +490,50 @@ class TestCaching:
 
 class TestBindingsSalixOwns:
     """Not every body binding is the body's to keep, and neither of these
-    collides with a field name. `__slots__` is taken unconditionally;
-    `__match_args__` only while the class wants one.
+    collides with a field name. `__slots__` is taken unconditionally, so an
+    entry that is not a field is refused rather than dropped -- #12.
+    `__match_args__` is taken only while the class wants one.
     """
 
-    def test_a_body_slots_is_replaced_by_the_fields(self):
-        class Slotted(Struct):
-            x: int
-            __slots__ = ("extra",)
+    def test_a_body_slot_that_is_not_a_field_is_refused(self):
+        with pytest.raises(TypeError, match="'extra', which is not a field"):
 
-        assert Slotted.__slots__ == ("x",)
+            class Slotted(Struct):
+                x: int
+                __slots__ = ("extra",)
+
+    def test_a_bare_string_slots_is_refused_too(self):
+        """`__slots__ = "extra"` is one name to `type.__new__`, not five
+        characters, so it has to be read the same way here.
+        """
+
+        with pytest.raises(TypeError, match="'extra', which is not a field"):
+
+            class Stringy(Struct):
+                x: int
+                __slots__ = "extra"
+
+    def test_a_body_slots_naming_only_fields_is_accepted(self):
+        """Refused when an entry would be *lost*, not merely when `__slots__` is
+        present. salix writes the field tuple over it, so a body that names the
+        fields loses nothing -- and the transformed namespace re-enters class
+        creation when a delegating metaclass wins, carrying salix's own
+        `__slots__` with it. `test_struct_identity.py` covers that path.
+        """
+
+        class Agreeing(Struct):
+            x: int
+            __slots__ = ("x",)
+
+        assert Agreeing.__slots__ == ("x",)
+        assert Agreeing(1).x == 1
+
+    def test_weakref_may_be_named_because_salix_writes_it(self):
+        class Weak(Struct, weakref=True):
+            x: int
+            __slots__ = ("__weakref__", "x")
+
+        assert weakref.ref(Weak(1))() is not None
 
     def test_a_body_match_args_is_replaced_by_the_fields(self):
         class Matched(Struct):
@@ -509,7 +544,7 @@ class TestBindingsSalixOwns:
 
     def test_opting_out_of_match_args_leaves_the_body_its_own(self):
         """`match_args=False` means salix writes none into this namespace, so
-        the body keeps what it wrote -- and `__slots__` does not.
+        the body keeps what it wrote.
 
         Not that the class has none: `Struct` itself carries a generated `()`,
         which every subclass sees through the MRO, so a struct that opts out and
@@ -520,7 +555,6 @@ class TestBindingsSalixOwns:
         class Matched(Struct, match_args=False):
             x: int
             __match_args__ = ("nope",)
-            __slots__ = ("extra",)
 
         class Silent(Struct, match_args=False):
             x: int

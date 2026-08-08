@@ -79,6 +79,7 @@ static PyObject * build_class_namespace(
 	bool inherits_body_eq,
 	bool derive_not_equal
 );
+static enum result refuse_displaced_slots(PyObject * original_namespace, PyObject * new_names);
 static PyObject * build_slots(PyObject * new_names, bool weakref);
 static enum result set_match_args(PyObject * namespace, PyObject * all_names, bool wanted);
 static enum result apply_options(
@@ -284,6 +285,12 @@ static PyObject * build_struct_class(
 	struct field_plan plan = field_plan_build(base, original_namespace);
 
 	if (field_plan_failed(&plan)) {
+		return NULL;
+	}
+
+	if (refuse_displaced_slots(original_namespace, plan.new_names) != RESULT_OK) {
+		field_plan_clear(&plan);
+
 		return NULL;
 	}
 
@@ -703,6 +710,55 @@ static PyObject * build_class_namespace(
 	}
 
 	return NULL;
+}
+
+static enum result refuse_displaced_slots(
+	PyObject * const original_namespace,
+	PyObject * const new_names
+) {
+	PyObject * const declared = PyDict_GetItemString(original_namespace, "__slots__");
+
+	if (declared == NULL) {
+		return PyErr_Occurred() ? RESULT_ERROR : RESULT_OK;
+	}
+
+	PY_OWNED(
+		entries,
+		PyUnicode_Check(declared) ? PyTuple_Pack(1, declared) : PySequence_Tuple(declared)
+	);
+
+	if (entries == NULL) {
+		return RESULT_ERROR;
+	}
+
+	for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(entries); ++i) {
+		PyObject * const entry = PyTuple_GET_ITEM(entries, i);
+		int const named_by_a_field = PySequence_Contains(new_names, entry);
+
+		if (named_by_a_field < 0) {
+			return RESULT_ERROR;
+		}
+
+		if (named_by_a_field == 1) {
+			continue;
+		}
+
+		if (PyUnicode_Check(entry) && PyUnicode_CompareWithASCIIString(entry, "__weakref__") == 0) {
+			continue;
+		}
+
+		PyErr_Format(
+			PyExc_TypeError,
+			"__slots__ names %R, which is not a field of this class; a struct's "
+			"fields are its slots, so salix would drop it -- declare it as a field, "
+			"or drop __slots__",
+			entry
+		);
+
+		return RESULT_ERROR;
+	}
+
+	return RESULT_OK;
 }
 
 /* __weakref__ is a slot like any other; a class that wants to be the target of
