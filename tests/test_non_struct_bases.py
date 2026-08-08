@@ -255,54 +255,6 @@ def test_a_co_base_supplying_only_a_hash_still_gets_salixs():
     assert hash(H(1, 0)) == hash((1, 0))
 
 
-def test_a_base_whose_equality_cannot_be_looked_up_fails_the_class():
-    """The cost of asking every base, stated rather than discovered.
-
-    Deciding the hash means reading each non-struct base's `__eq__`, and that
-    runs whatever the base put under the name. A descriptor that raises used to
-    go unnoticed, because the struct base was the only one consulted; now it
-    stops the class being defined.
-
-    Propagating beats demoting because demoting is a lie about what was
-    learned: a probe that could not look has not found out that the base
-    supplies no equality. It is not that the class is unusable otherwise --
-    demote and it builds with salix's structural equality, ignoring Hostile's
-    entirely, which is worse for being quiet. It is a class that built before,
-    so it is pinned either way.
-    """
-
-    with pytest.raises(RuntimeError, match="no equality here"):
-
-        class B(Hostile, Base):
-            y: object = 0
-
-
-def test_only_the_equality_is_read_off_a_base_that_did_not_supply_one():
-    """Every attribute read off a co-base is a class that can fail to define,
-    so the walk reads what the decision turns on and nothing else.
-
-    A base supplying no `__eq__` has already answered -- it adds nothing to the
-    lookup -- so its `__hash__` and `__ne__` are never asked for, and a
-    descriptor raising under either of those names cannot stop a class that
-    salix was going to answer for anyway.
-    """
-
-    class RaisingHash:
-        __hash__ = Raising()  # type: ignore[assignment]
-
-    class RaisingNotEqual:
-        __ne__ = Raising()  # type: ignore[assignment]
-
-    class H(RaisingHash, Base):
-        y: object = 0
-
-    class N(RaisingNotEqual, Base):
-        y: object = 0
-
-    assert hash(H(1, 0)) == hash((1, 0))
-    assert hash(N(1, 0)) == hash((1, 0))
-
-
 def test_a_body_that_writes_its_own_equality_is_not_asked_for_a_bases():
     """The other half of the gate, and the half nothing pinned: removing
     `!body_defines_eq` from the condition leaves every other test here green
@@ -412,24 +364,6 @@ def test_a_co_base_derived_from_the_mixin_does_not_count_as_having_paired_them()
     assert (B(1, 0) != B(2, 0)) is False
 
 
-def test_a_co_base_with_a_raising_inequality_beside_a_real_equality_fails_too():
-    """`__ne__` is read only off a base that supplied `__eq__`, so this is the
-    one shape where a name other than `__eq__` can refuse a class. Same trade
-    as the equality probe, pinned so it is not a surprise.
-    """
-
-    class RealEqualityRaisingNotEqual:  # noqa: PLW1641 -- the absent __hash__ is not what is under test
-        def __eq__(self, other: object) -> bool:
-            return True
-
-        __ne__ = Raising()  # type: ignore[assignment]
-
-    with pytest.raises(RuntimeError, match="no equality here"):
-
-        class B(RealEqualityRaisingNotEqual, Base):
-            y: object = 0
-
-
 @pytest.mark.xfail(strict=True, reason="#76: a co-base between two struct bases is not seen")
 def test_a_co_base_between_two_struct_bases_is_not_seen_either():
     """The same limit as the later-struct-base case, reached by a co-base
@@ -477,3 +411,45 @@ def test_equality_and_inequality_may_come_from_different_co_bases():
     assert B.__ne__ is NotEqual.__ne__
     assert Plain.__ne__ is NotEqual.__ne__
     assert (B(1, 0) != B(2, 0)) == "from the second base"
+
+
+@pytest.mark.parametrize("name", ["__eq__", "__ne__", "__hash__"])
+def test_no_attribute_of_a_co_base_is_ever_fetched(name):
+    """Which base supplies the equality is read from the class dicts, not by
+    fetching the attribute -- so a descriptor that raises cannot stop a class
+    being defined.
+
+    Every earlier shape of this fix fetched, and each time the set of names it
+    fetched grew a review found another class that had built before and no
+    longer did. Asking the dicts runs nothing.
+    """
+
+    hostile = type("Hostile", (), {name: Raising()})
+
+    built = type(Struct)(
+        "B", (hostile, Base), {"__annotations__": {"y": object}}
+    )
+
+    assert built(1, 0).x == 1
+
+
+def test_a_body_that_writes_object_equality_has_still_written_one():
+    """`__eq__ = object.__eq__` is how a body opts out of an inherited
+    equality, and Python treats it as a definition -- the class is unhashable
+    for it. Fetching the attribute could never tell it from not defining one,
+    because the value is object's either way; the class dict can.
+    """
+
+    class OptedOut:  # noqa: PLW1641 -- the absent __hash__ is the assertion
+        __eq__ = object.__eq__
+
+    class B(OptedOut, Base):
+        y: object = 0
+
+    class Plain(OptedOut):
+        pass
+
+    assert Plain.__hash__ is None
+    assert B.__hash__ is None
+    assert (B(1, 0) == B(1, 0)) is False
+    assert (B(1, 0) != B(1, 0)) is True

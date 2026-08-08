@@ -25,6 +25,12 @@ struct member_lookup {
 /* Whether the __eq__ a class resolves came from a class body, and whether the
  * question could be answered -- asking a base runs whatever its metaclass
  * defines, so the lookup can raise. */
+/* Whether a name is defined, and whether the dicts could be read at all. */
+struct definition {
+	enum { DEFINITION_READ, DEFINITION_UNREADABLE } tag;
+	bool found;
+};
+
 struct equality_source {
 	enum { EQUALITY_RESOLVED, EQUALITY_FAILED } tag;
 	bool from_a_body;
@@ -55,17 +61,8 @@ static StructType * find_struct_base(PyObject * bases);
 static StructType * find_behaviour_base(PyObject * bases);
 static struct equality_source resolves_body_equality(PyObject * bases);
 static struct equality_source equality_from_the_co_bases(PyObject * bases, Py_ssize_t first);
-static struct equality_source base_equality(
-	PyObject * base,
-	PyObject * objects_equal,
-	PyObject * mixin_equal
-);
-static struct equality_source supplies_not_equal(
-	PyObject * bases,
-	Py_ssize_t first,
-	PyObject * objects_not_equal,
-	PyObject * mixin_not_equal
-);
+static struct definition base_defines(PyObject * base, PyObject * name);
+static struct definition any_base_defines(PyObject * bases, Py_ssize_t first, PyObject * name);
 static struct options inherited_options(PyObject * bases, StructType const * behaviour);
 static bool any_struct_base_is_mutable(PyObject * bases);
 static bool has_weakref_slot(StructType const * base);
@@ -481,28 +478,10 @@ static struct equality_source equality_from_the_co_bases(
 	PyObject * const bases,
 	Py_ssize_t const first
 ) {
-	PyTypeObject * const objects_type = &PyBaseObject_Type;
-	PY_OWNED(objects_equal, PyObject_GetAttrString((PyObject *) objects_type, "__eq__"));
+	PY_OWNED(equal, PyUnicode_InternFromString("__eq__"));
+	PY_OWNED(not_equal, PyUnicode_InternFromString("__ne__"));
 
-	if (objects_equal == NULL) {
-		return (struct equality_source){.tag = EQUALITY_FAILED};
-	}
-
-	PY_OWNED(mixin_equal, PyObject_GetAttrString((PyObject *) &StructMixin_Type, "__eq__"));
-
-	if (mixin_equal == NULL) {
-		return (struct equality_source){.tag = EQUALITY_FAILED};
-	}
-
-	PY_OWNED(objects_not_equal, PyObject_GetAttrString((PyObject *) objects_type, "__ne__"));
-
-	if (objects_not_equal == NULL) {
-		return (struct equality_source){.tag = EQUALITY_FAILED};
-	}
-
-	PY_OWNED(mixin_not_equal, PyObject_GetAttrString((PyObject *) &StructMixin_Type, "__ne__"));
-
-	if (mixin_not_equal == NULL) {
+	if (equal == NULL || not_equal == NULL) {
 		return (struct equality_source){.tag = EQUALITY_FAILED};
 	}
 
@@ -513,52 +492,46 @@ static struct equality_source equality_from_the_co_bases(
 			return (struct equality_source){
 				.tag = EQUALITY_RESOLVED,
 				.from_a_body = ((StructType *) base)->struct_resolves_body_eq,
-				.needs_derived_not_equal = false,
 			};
 		}
 
-		struct equality_source const answer = base_equality(base, objects_equal, mixin_equal);
+		struct definition const supplies_equality = base_defines(base, equal);
 
-		if (answer.tag == EQUALITY_FAILED) {
-			return answer;
+		if (supplies_equality.tag == DEFINITION_UNREADABLE) {
+			return (struct equality_source){.tag = EQUALITY_FAILED};
 		}
 
-		if (answer.from_a_body) {
-			struct equality_source const paired =
-				supplies_not_equal(bases, first, objects_not_equal, mixin_not_equal);
-
-			return (
-				paired.tag == EQUALITY_FAILED ? paired :
-				(struct equality_source){
-					.tag = EQUALITY_RESOLVED,
-					.from_a_body = true,
-					.needs_derived_not_equal = !paired.needs_derived_not_equal,
-				}
-			);
+		if (!supplies_equality.found) {
+			continue;
 		}
+
+		/* The equality is settled. Inequality is a separate question over the
+		 * same bases, because the two can come from different ones:
+		 * `class B(Equal, WeirdNotEqual, Base)` takes equality from the first
+		 * and inequality from the second, which is what plain Python resolves. */
+		struct definition const supplies_inequality = any_base_defines(bases, first, not_equal);
+
+		return (
+			supplies_inequality.tag == DEFINITION_UNREADABLE ? (struct equality_source){
+				.tag = EQUALITY_FAILED,
+			} :
+			(struct equality_source){
+				.tag = EQUALITY_RESOLVED,
+				.from_a_body = true,
+				.needs_derived_not_equal = !supplies_inequality.found,
+			}
+		);
 	}
 
 	return (struct equality_source){.tag = EQUALITY_RESOLVED, .from_a_body = false};
 }
 
-/*
- * Whether any co-base carries a __ne__ of its own, which is then the __ne__
- * the class resolves and not salix's to replace.
- *
- * Asked over the same bases as the equality and separately from it, because
- * the two can come from different ones: `class B(Equal, WeirdNotEqual, Base)`
- * takes equality from the first and inequality from the second. Reading the
- * __ne__ of whichever base supplied __eq__ answered about the wrong class, and
- * the derived one went in over a pairing that was already there.
- *
- * `needs_derived_not_equal` carries "one was found" here; the caller inverts
- * it, since salix derives one exactly when nobody else supplies it.
- */
-static struct equality_source supplies_not_equal(
+/* The same question of every co-base, for the name the class will resolve
+ * rather than for one base's answer. */
+static struct definition any_base_defines(
 	PyObject * const bases,
 	Py_ssize_t const first,
-	PyObject * const objects_not_equal,
-	PyObject * const mixin_not_equal
+	PyObject * const name
 ) {
 	for (Py_ssize_t i = first; i < PyTuple_GET_SIZE(bases); ++i) {
 		PyObject * const base = PyTuple_GET_ITEM(bases, i);
@@ -567,51 +540,65 @@ static struct equality_source supplies_not_equal(
 			break;
 		}
 
-		PY_OWNED(inequality, PyObject_GetAttrString(base, "__ne__"));
+		struct definition const found = base_defines(base, name);
 
-		if (inequality == NULL) {
-			return (struct equality_source){.tag = EQUALITY_FAILED};
-		}
-
-		if (inequality != objects_not_equal && inequality != mixin_not_equal) {
-			return (struct equality_source){
-				.tag = EQUALITY_RESOLVED,
-				.needs_derived_not_equal = true,
-			};
+		if (found.tag == DEFINITION_UNREADABLE || found.found) {
+			return found;
 		}
 	}
 
-	return (struct equality_source){.tag = EQUALITY_RESOLVED, .needs_derived_not_equal = false};
+	return (struct definition){.tag = DEFINITION_READ, .found = false};
 }
 
 /*
- * The two __eq__ that are not a body's: object's, which is the absence of one,
- * and the mixin's, which is salix's own. A base resolving either contributes
- * nothing a class body wrote, so the next base is what decides.
+ * Whether this base's own ancestry defines `name`, read from the class dicts
+ * rather than by fetching the attribute.
  *
- * The mixin has to be here rather than assumed unreachable, because it is the
- * only base Struct itself has and its metaclass is plain `type` -- so the
- * struct-base arm above does not catch it, and counting its __eq__ as a body's
- * recorded that against Struct and every struct inheriting from it.
+ * Fetching was the earlier shape and it was wrong twice over. It runs whatever
+ * the base put under the name, so a descriptor that raises refused a class
+ * that had built before -- four rounds of this review found a new instance of
+ * that each time the set of names being read grew. And it can only classify
+ * the result by pointer-comparing against object's and the mixin's cached
+ * method-wrappers, which is an implementation detail of how CPython caches
+ * type attributes rather than a fact the language guarantees.
+ *
+ * Asking the dicts answers exactly the question that matters -- did a class
+ * body write this name -- and answers it for `__eq__ = object.__eq__` too,
+ * which fetching could never tell from not defining one at all. object and the
+ * mixin are skipped because those are the two answers that mean "nobody did".
  */
-static struct equality_source base_equality(
-	PyObject * const base,
-	PyObject * const objects_equal,
-	PyObject * const mixin_equal
-) {
-	/* Only __eq__, and only off a base that might supply it: every attribute
-	 * read here runs whatever the base put under the name, and each one is a
-	 * class that fails to define where it used to build. */
-	PY_OWNED(equality, PyObject_GetAttrString(base, "__eq__"));
+static struct definition base_defines(PyObject * const base, PyObject * const name) {
+	PyObject * const mro = ((PyTypeObject *) base)->tp_mro;
 
-	if (equality == NULL) {
-		return (struct equality_source){.tag = EQUALITY_FAILED};
+	if (mro == NULL) {
+		return (struct definition){.tag = DEFINITION_READ, .found = false};
 	}
 
-	return (struct equality_source){
-		.tag = EQUALITY_RESOLVED,
-		.from_a_body = equality != objects_equal && equality != mixin_equal,
-	};
+	for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(mro); ++i) {
+		PyObject * const entry = PyTuple_GET_ITEM(mro, i);
+
+		if (entry == (PyObject *) &PyBaseObject_Type || entry == (PyObject *) &StructMixin_Type) {
+			continue;
+		}
+
+		PY_OWNED(dict, struct_type_dict((PyTypeObject *) entry));
+
+		if (dict == NULL) {
+			return (struct definition){.tag = DEFINITION_UNREADABLE};
+		}
+
+		int const present = PyDict_Contains(dict, name);
+
+		if (present < 0) {
+			return (struct definition){.tag = DEFINITION_UNREADABLE};
+		}
+
+		if (present == 1) {
+			return (struct definition){.tag = DEFINITION_READ, .found = true};
+		}
+	}
+
+	return (struct definition){.tag = DEFINITION_READ, .found = false};
 }
 
 /*
