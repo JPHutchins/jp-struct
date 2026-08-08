@@ -66,6 +66,7 @@ static struct definition any_base_defines(PyObject * bases, Py_ssize_t first, Py
 static struct options inherited_options(PyObject * bases, StructType const * behaviour);
 static bool any_struct_base_is_mutable(PyObject * bases);
 static bool has_weakref_slot(StructType const * base);
+static bool any_base_has_weakref_slot(PyObject * bases);
 static struct options base_options(StructType const * base);
 static PyObject * build_class_namespace(
 	PyObject * original_namespace,
@@ -296,7 +297,7 @@ static PyObject * build_struct_class(
 		refuse_displaced_slots(
 			original_namespace,
 			plan.all_names,
-			request.options.weakref || has_weakref_slot(base)
+			request.options.weakref || any_base_has_weakref_slot(bases)
 		) !=
 		RESULT_OK
 	) {
@@ -681,6 +682,18 @@ static bool has_weakref_slot(StructType const * const base) {
 	return base != NULL && base->heap_type.ht_type.tp_weaklistoffset != 0;
 }
 
+static bool any_base_has_weakref_slot(PyObject * const bases) {
+	for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(bases); ++i) {
+		PyObject * const base = PyTuple_GET_ITEM(bases, i);
+
+		if (PyType_Check(base) && ((PyTypeObject *) base)->tp_weaklistoffset != 0) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
 /* The namespace handed to type.__new__: a copy of the original with every
  * class-body binding of a field name removed (so none of them clashes with the
  * __slots__ descriptor that reads the value) plus __slots__ / __match_args__
@@ -763,8 +776,9 @@ static enum result refuse_displaced_slots(
 
 			PyErr_SetString(
 				PyExc_TypeError,
-				"__slots__ names __weakref__, which salix writes only for a class "
-				"that asks for it; pass weakref=True instead"
+				"__slots__ names __weakref__ and this class carries no weakref "
+				"slot to name; a struct gets one from weakref=True or from a base "
+				"that has one"
 			);
 
 			return RESULT_ERROR;

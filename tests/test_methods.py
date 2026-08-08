@@ -550,11 +550,48 @@ class TestBindingsSalixOwns:
         and dropping it leaves a class that cannot be weak-referenced at all.
         """
 
-        with pytest.raises(TypeError, match="pass weakref=True instead"):
+        with pytest.raises(TypeError, match="carries no weakref slot to name"):
 
             class Unasked(Struct):
                 x: int
                 __slots__ = ("__weakref__", "x")
+
+    def test_an_inherited_weakref_slot_exempts_it_too(self):
+        """The other half of the exemption: the class need not ask for the slot
+        if a base already has one, because then salix drops nothing.
+        """
+
+        class Referenceable(Struct, weakref=True):
+            pass
+
+        class Child(Referenceable):
+            x: int = 0
+            __slots__ = ("__weakref__",)
+
+        held = Child(1)
+
+        assert weakref.ref(held)() is held
+
+    def test_the_base_with_the_slot_need_not_be_the_layout_base(self):
+        """`has_weakref_slot` asks the widest struct base, which is the one
+        CPython gives `tp_base`. The slot comes from *any* base, so asking only
+        that one refused a class that is weak-referenceable without the entry --
+        and the same class one base-order over was accepted.
+        """
+
+        class Referenceable(Struct, weakref=True):
+            pass
+
+        class Wider(Struct):
+            a: int
+            b: int
+
+        class Both(Wider, Referenceable):
+            __slots__ = ("__weakref__",)
+
+        held = Both(1, 2)
+
+        assert weakref.ref(held)() is held
 
     def test_a_slot_naming_an_inherited_field_is_accepted(self):
         """Refused when an entry would be lost, and an inherited field's slot is
