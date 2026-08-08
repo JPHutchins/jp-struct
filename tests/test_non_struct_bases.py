@@ -291,6 +291,26 @@ def test_only_the_equality_is_read_off_a_base_that_did_not_supply_one():
     assert hash(N(1, 0)) == hash((1, 0))
 
 
+def test_a_body_that_writes_its_own_equality_is_not_asked_for_a_bases():
+    """The other half of the gate, and the half nothing pinned: removing
+    `!body_defines_eq` from the condition leaves every other test here green
+    while refusing this class again.
+
+    A body `__eq__` sits in the class's own dict ahead of every base, so no
+    co-base's equality is ever resolved and `bind_not_equal` fires on the body
+    alone. Reading Hostile's `__eq__` to decide something already decided is
+    what refused it.
+    """
+
+    class B(Hostile, Base):  # noqa: PLW1641 -- the absent __hash__ is asserted below
+        def __eq__(self, other: object) -> bool:
+            return True
+
+    assert B(1) == B(2)
+    assert (B(1) != B(2)) is False
+    assert B.__hash__ is None
+
+
 def test_a_class_that_throws_that_equality_away_is_not_asked_for_it():
     """The bases are read only where the answer can be used.
 
