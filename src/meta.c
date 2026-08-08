@@ -99,7 +99,13 @@ static enum result bind_hash(
 	bool inherits_body_eq
 );
 static enum result drop_class_variables(PyObject * namespace, PyObject * all_names);
-static int defines_a_method(PyObject * bound, PyObject * field_name);
+static enum result refuse_colliding_methods(
+	PyObject * original_namespace,
+	PyObject * all_names,
+	PyObject * class_name
+);
+static int defines_a_method(PyObject * bound, PyObject * field_name, PyObject * class_name);
+static int defined_in_this_body(PyObject * qualname, PyObject * field_name, PyObject * class_name);
 static StructType * create_class(
 	PyTypeObject * metatype,
 	PyObject * name,
@@ -285,6 +291,12 @@ static PyObject * build_struct_class(
 	struct field_plan plan = field_plan_build(base, original_namespace);
 
 	if (field_plan_failed(&plan)) {
+		return NULL;
+	}
+
+	if (refuse_colliding_methods(original_namespace, plan.all_names, name) != RESULT_OK) {
+		field_plan_clear(&plan);
+
 		return NULL;
 	}
 
@@ -910,20 +922,30 @@ static enum result bind_hash(
 	return rebind(namespace, hash_name, options.eq);
 }
 
-/*
- * Any class-body binding of a field name -- an annotated default, or a bare
+/* Any class-body binding of a field name -- an annotated default, or a bare
  * assignment over a name the base already declared -- would sit in this class's
- * dict ahead of the __slots__ descriptor that reads the value.
- *
- * A method is refused rather than dropped. Dropping it was silent twice over:
- * the class lost a definition its body plainly meant to keep, and the value
- * became that field's default, so a required field turned optional and
- * _struct_defaults_ reported a function where an int's default belonged.
- */
+ * dict ahead of the __slots__ descriptor that reads the value. */
 static enum result drop_class_variables(PyObject * const namespace, PyObject * const all_names) {
 	for (Py_ssize_t i = 0; i < PyList_GET_SIZE(all_names); ++i) {
 		PyObject * const field_name = PyList_GET_ITEM(all_names, i);
-		PY_OWNED(bound, dict_value_ref(namespace, field_name));
+		int const present = PyDict_Contains(namespace, field_name);
+
+		if (present < 0 || (present == 1 && PyDict_DelItem(namespace, field_name) < 0)) {
+			return RESULT_ERROR;
+		}
+	}
+
+	return RESULT_OK;
+}
+
+static enum result refuse_colliding_methods(
+	PyObject * const original_namespace,
+	PyObject * const all_names,
+	PyObject * const class_name
+) {
+	for (Py_ssize_t i = 0; i < PyList_GET_SIZE(all_names); ++i) {
+		PyObject * const field_name = PyList_GET_ITEM(all_names, i);
+		PY_OWNED(bound, dict_value_ref(original_namespace, field_name));
 
 		if (bound == NULL) {
 			if (PyErr_Occurred()) {
@@ -933,7 +955,7 @@ static enum result drop_class_variables(PyObject * const namespace, PyObject * c
 			continue;
 		}
 
-		int const method = defines_a_method(bound, field_name);
+		int const method = defines_a_method(bound, field_name, class_name);
 
 		if (method < 0) {
 			return RESULT_ERROR;
@@ -951,37 +973,16 @@ static enum result drop_class_variables(PyObject * const namespace, PyObject * c
 
 			return RESULT_ERROR;
 		}
-
-		if (PyDict_DelItem(namespace, field_name) < 0) {
-			return RESULT_ERROR;
-		}
 	}
 
 	return RESULT_OK;
 }
 
-/*
- * Whether the class body wrote a method under this field's name, rather than a
- * value for the field to default to. 1 yes, 0 no, -1 with an exception set.
- *
- * The four spellings Python's own syntax produces, and no more. A function is
- * asked for its name because a function is also an ordinary value --
- * `handler: object = default_handler` defaults a field to a module-level
- * function and has to keep working -- and only a `def` written in this body
- * carries the field's own name. The three decorators are never a value anyone
- * means, so the type alone answers, subclasses included.
- *
- * A descriptor test would be shorter and is not portable: functools.partial
- * gained __get__ in 3.13, so `handler: object = partial(f, 1)` would build on
- * 3.10 through 3.12 and be refused from there on. A bound method is a descriptor
- * too. Both are defaults someone means. The cost of naming the four is
- * functools.cached_property, which is its own type rather than a property
- * subclass and so is dropped as it was before.
- *
- * No attribute is fetched, so nothing here runs the class author's code:
- * func_name is a struct field and the rest are type checks.
- */
-static int defines_a_method(PyObject * const bound, PyObject * const field_name) {
+static int defines_a_method(
+	PyObject * const bound,
+	PyObject * const field_name,
+	PyObject * const class_name
+) {
 	if (
 		PyObject_TypeCheck(bound, &PyProperty_Type) ||
 		PyObject_TypeCheck(bound, &PyClassMethod_Type) ||
@@ -994,7 +995,43 @@ static int defines_a_method(PyObject * const bound, PyObject * const field_name)
 		return 0;
 	}
 
-	return PyObject_RichCompareBool(((PyFunctionObject *) bound)->func_name, field_name, Py_EQ);
+	return defined_in_this_body(
+		((PyFunctionObject *) bound)->func_qualname,
+		field_name,
+		class_name
+	);
+}
+
+static int defined_in_this_body(
+	PyObject * const qualname,
+	PyObject * const field_name,
+	PyObject * const class_name
+) {
+	if (!PyUnicode_Check(qualname)) {
+		return 0;
+	}
+
+	PY_OWNED(own, PyUnicode_FromFormat("%U.%U", class_name, field_name));
+
+	if (own == NULL) {
+		return -1;
+	}
+
+	int const written_here = PyObject_RichCompareBool(qualname, own, Py_EQ);
+
+	if (written_here != 0) {
+		return written_here;
+	}
+
+	PY_OWNED(nested, PyUnicode_FromFormat(".%U", own));
+
+	if (nested == NULL) {
+		return -1;
+	}
+
+	Py_ssize_t const matched = PyUnicode_Tailmatch(qualname, nested, 0, PY_SSIZE_T_MAX, 1);
+
+	return matched < 0 ? -1 : matched != 0;
 }
 
 static StructType * create_class(

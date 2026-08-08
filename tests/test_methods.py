@@ -532,9 +532,14 @@ class TestBindingsSalixOwns:
 
 
 def module_level_handler(value: int) -> int:
-    """A function used as a field's default rather than as a method. Module
-    level and named for what it does, which is what separates it from a `def`
-    written in the body under the field's own name.
+    """A function used as a field's default rather than as a method."""
+
+    return value
+
+
+def handler(value: int) -> int:
+    """Named exactly as the field that defaults to it, which is the case a rule
+    keyed on the function's own `__name__` cannot tell from a body `def`.
     """
 
     return value
@@ -609,6 +614,21 @@ class TestNameCollisions:
                 def x(self) -> str:
                     return "method"
 
+    def test_a_property_collides_with_an_inherited_field_too(self):
+        """The type-check branch against `all_names` rather than this class's own
+        annotations, which is the half the `def` test above cannot see.
+        """
+
+        class Base(Struct):
+            y: int
+
+        with pytest.raises(TypeError, match=r"'y' is a field.*binds a property"):
+
+            class Child(Base):
+                @property
+                def y(self) -> str:
+                    return "property"
+
     def test_the_message_names_the_remedy(self):
         with pytest.raises(TypeError, match="rename one of them"):
 
@@ -649,13 +669,51 @@ class TestDefaultsThatAreCallable:
         assert WithHandler().handler is module_level_handler
 
     def test_a_lambda_defaults_a_field(self):
-        def identity(value: int) -> int:
-            return value
+        """A real lambda, whose `__qualname__` ends in `<lambda>` and so can
+        never match a field name however the class is spelled.
+        """
+
+        identity = lambda value: value  # noqa: E731 -- the lambda is the subject
 
         class WithLambda(Struct):
             handler: object = identity
 
         assert WithLambda().handler is identity
+
+    def test_a_function_whose_name_matches_the_field_defaults_it(self):
+        """The false positive the first version of this rule had: the class dict
+        records `handler -> function` identically whether the body wrote
+        `def handler(self)` or defaulted the field to a module-level `handler`.
+        Only `__qualname__` separates them.
+        """
+
+        class WithSameName(Struct):
+            handler: object = handler
+
+        assert WithSameName().handler is handler
+
+    def test_re_defaulting_an_inherited_field_to_a_same_named_function(self):
+        class Base(Struct):
+            handler: object = None
+
+        class Child(Base):
+            handler: object = handler
+
+        assert Child().handler is handler
+
+    def test_a_method_of_another_class_defaults_a_field(self):
+        """`__qualname__` is `Source.handler`, which is not this class's own
+        `handler`, so the last two components do not match.
+        """
+
+        class Source:
+            def handler(self) -> int:
+                return 1
+
+        class WithForeign(Struct):
+            handler: object = Source.handler
+
+        assert WithForeign().handler is Source.handler
 
     def test_a_partial_defaults_a_field(self):
         bound = functools.partial(module_level_handler, 1)
@@ -688,3 +746,43 @@ class TestDefaultsThatAreCallable:
             emit: object = print
 
         assert WithBuiltin().emit is print
+
+
+class TestCollisionsStillNotRefused:
+    """The wrapped spellings the four-spelling rule does not reach, pinned so
+    the silent defaulting cannot regress unnoticed. #54's refusal covers a
+    `def` and the three decorators; a `functools` wrapper is neither a
+    `property` subclass nor a function, so it is dropped and becomes the
+    field's default exactly as before -- a required field silently turning
+    optional, which is the corruption #54 describes.
+
+    Not widened here because no version-stable test separates these from a
+    default someone means: `functools.partial` is a descriptor from 3.13 and
+    not before, and a bound method is one on every version. Tracked as its
+    own issue.
+    """
+
+    def test_a_cached_property_named_after_a_field_still_becomes_its_default(self):
+        class Cached(Struct):
+            x: int
+
+            @functools.cached_property
+            def x(self) -> int:
+                return 99
+
+        (default,) = Cached._struct_defaults_
+
+        assert isinstance(default, functools.cached_property)
+        assert Cached().x is default
+
+    def test_a_cache_wrapped_method_named_after_a_field_does_the_same(self):
+        class Wrapped(Struct):
+            y: int
+
+            @functools.cache  # noqa: B019 -- the wrapper is the subject, not the caching
+            def y(self) -> int:
+                return 99
+
+        (default,) = Wrapped._struct_defaults_
+
+        assert Wrapped().y is default
