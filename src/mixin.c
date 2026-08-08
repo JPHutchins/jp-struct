@@ -93,8 +93,10 @@ static PyGetSetDef Struct_getset[] = {
  * discovered, because it is a consequence of the fallback policy and not a
  * separate decision.
  *
- * The two getsets are the exception either way: they report struct metadata and
- * nothing else, so there is nothing to fall back to and they raise. An
+ * The metadata getsets are the exception either way -- all four of them, the
+ * two salix defines and the two it answers to for msgspec's sake: they report
+ * struct metadata and nothing else, so there is nothing to fall back to and
+ * they raise. An
  * AttributeError rather than a TypeError, because "this object does not have
  * that attribute" is what happened and it is what `hasattr` and `getattr`'s
  * default are written to catch.

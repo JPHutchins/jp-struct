@@ -21,6 +21,13 @@ from salix import Struct
 SALIX = ("_struct_fields_", "_struct_defaults_")
 MSGSPEC = ("__struct_fields__", "__struct_defaults__")
 PAIRS = tuple(zip(SALIX, MSGSPEC, strict=True))
+FIELD_NAMES = (SALIX[0], MSGSPEC[0])
+EXPECTED = (
+    ("_struct_fields_", ("x", "y")),
+    ("__struct_fields__", ("x", "y")),
+    ("_struct_defaults_", (2,)),
+    ("__struct_defaults__", (2,)),
+)
 MIXIN = Struct.__mro__[1]
 META = type(Struct)
 
@@ -30,19 +37,25 @@ class Point(Struct):
     y: int = 2
 
 
-@pytest.mark.parametrize(("ours", "theirs"), PAIRS)
-def test_the_alias_answers_what_the_sunder_does_on_the_class(ours, theirs):
-    assert getattr(Point, theirs) == getattr(Point, ours)
+@pytest.mark.parametrize(("name", "expected"), EXPECTED)
+def test_every_spelling_reports_the_value_itself_on_the_class(name, expected):
+    """The value rather than the other spelling. On the class both spellings
+    are wired to the same C getter, so comparing them to each other holds by
+    construction and would survive a fields getter that returned the defaults
+    for both.
+    """
+
+    assert getattr(Point, name) == expected
 
 
-@pytest.mark.parametrize(("ours", "theirs"), PAIRS)
-def test_the_alias_answers_what_the_sunder_does_on_an_instance(ours, theirs):
-    assert getattr(Point(1), theirs) == getattr(Point(1), ours)
+@pytest.mark.parametrize(("name", "expected"), EXPECTED)
+def test_every_spelling_reports_the_value_itself_on_an_instance(name, expected):
+    """Worth stating separately: the mixin wires the four names to four
+    different functions, so a crossed `which` enum shows up here and nowhere
+    else.
+    """
 
-
-def test_the_sunder_reports_the_fields_and_the_defaults():
-    assert Point._struct_fields_ == ("x", "y")
-    assert Point._struct_defaults_ == (2,)
+    assert getattr(Point(1), name) == expected
 
 
 @pytest.mark.parametrize("name", SALIX + MSGSPEC)
@@ -57,16 +70,42 @@ def test_neither_spelling_may_be_assigned(name):
 
 
 @pytest.mark.parametrize("name", SALIX + MSGSPEC)
-def test_both_spellings_are_descriptors_rather_than_values_in_each_class(name):
+def test_salix_writes_no_spelling_into_the_classes_it_builds(name):
     """A getset on the metaclass answers for the class and one on the mixin
-    answers for the instance, so no class dict carries either -- which is what
-    stops a subclass shadowing one spelling and leaving the other to report
-    something the first no longer agrees with.
+    answers for the instance; salix puts neither into the class it builds.
+
+    An earlier version of this said that arrangement stops a class shadowing
+    one spelling. It does not, and the test below is what that actually does.
     """
 
     assert name not in vars(Point)
     assert name in vars(META)
     assert name in vars(MIXIN)
+
+
+@pytest.mark.parametrize("name", SALIX + MSGSPEC)
+def test_a_body_that_takes_one_of_these_names_is_read_two_ways(name):
+    """Reserving the names did not make them unusable, and a class that uses
+    one anyway answers differently depending on where it is read.
+
+    The metaclass getset is a data descriptor, so it wins on the class. On an
+    instance the class's own binding is what the lookup reaches first -- the
+    slot descriptor for a field, or the value for a plain assignment -- so the
+    metadata is what the class says and the body is what the instance says.
+
+    This is not new with the sunder: `__struct_fields__` as a field name has
+    always done it. What is new is that two more names now behave this way,
+    which is the cost of reserving them. Filed as #82; pinned here so that a
+    decision about it is a decision rather than a discovery.
+    """
+
+    shadowed = type(Struct)(
+        "Shadowed", (Struct,), {"__annotations__": {name: int, "x": int}}
+    )
+    metadata = (name, "x") if name in FIELD_NAMES else ()
+
+    assert getattr(shadowed, name) == metadata
+    assert getattr(shadowed(5, 6), name) == 5
 
 
 def test_a_subclass_reports_its_own_fields_under_both_names():
