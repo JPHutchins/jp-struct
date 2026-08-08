@@ -59,6 +59,8 @@ def inheritance_extends_the_signature() -> None:
 
 
 def introspection_is_typed_on_both_the_class_and_the_instance() -> None:
+    assert_type(Point._struct_fields_, tuple[str, ...])
+    assert_type(Point(1, "two")._struct_fields_, tuple[str, ...])
     assert_type(Point.__struct_fields__, tuple[str, ...])
     assert_type(Point(1, "two").__struct_fields__, tuple[str, ...])
     # Narrower than the stub declares: the transform synthesises the literal

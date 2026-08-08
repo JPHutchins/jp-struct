@@ -79,7 +79,7 @@ def test_a_copied_default_hands_out_no_reference_to_itself():
     class Holder(Struct):
         xs: list = []  # noqa: RUF012 -- the copy is what is being counted
 
-    (stored,) = Holder.__struct_defaults__
+    (stored,) = Holder._struct_defaults_
     before = sys.getrefcount(stored)
     instances = [Holder() for _ in range(10)]
 
@@ -98,7 +98,7 @@ def test_an_uncopied_default_is_shared_by_every_instance():
     name says which of the two it pins, now that both exist.
     """
 
-    default = Defaulted.__struct_defaults__ if hasattr(Defaulted, "__struct_defaults__") else None
+    default = Defaulted._struct_defaults_ if hasattr(Defaulted, "_struct_defaults_") else None
     sentinel = Defaulted(None).optional
     before = sys.getrefcount(sentinel)
     instances = [Defaulted(None) for _ in range(10)]
@@ -122,7 +122,7 @@ def test_a_body_init_shares_an_uncopied_default_the_same_way():
         def __init__(self) -> None:
             pass
 
-    (sentinel,) = Declining.__struct_defaults__
+    (sentinel,) = Declining._struct_defaults_
     before = sys.getrefcount(sentinel)
     instances = [Declining() for _ in range(10)]
 
@@ -140,7 +140,7 @@ def test_a_body_init_copies_a_mutable_default_without_retaining_it():
         def __init__(self) -> None:
             pass
 
-    (stored,) = Declining.__struct_defaults__
+    (stored,) = Declining._struct_defaults_
     before = sys.getrefcount(stored)
     instances = [Declining() for _ in range(10)]
 
@@ -160,7 +160,7 @@ def test_a_body_init_that_raises_releases_the_defaults_tp_new_wrote():
         def __init__(self) -> None:
             raise ValueError
 
-    (sentinel,) = Failing.__struct_defaults__
+    (sentinel,) = Failing._struct_defaults_
     before = sys.getrefcount(sentinel)
 
     for _ in range(10):
@@ -177,7 +177,7 @@ def test_a_body_init_that_raises_releases_the_defaults_tp_new_wrote():
         def __init__(self) -> None:
             pass
 
-    assert Writing().optional is Writing.__struct_defaults__[0]
+    assert Writing().optional is Writing._struct_defaults_[0]
 
 
 def test_reading_a_field_does_not_accumulate():
@@ -367,7 +367,7 @@ def test_a_delegating_metatype_installs_the_field_table_once():
     before = sys.getrefcount(post_init)
     built = type(Struct)("Built", (Base,), namespace)
 
-    assert built.__struct_fields__ == ("x", "y")
+    assert built._struct_fields_ == ("x", "y")
     assert built(1, 2).y == 2
 
     # `before` already counts the namespace dict's reference. The two are the

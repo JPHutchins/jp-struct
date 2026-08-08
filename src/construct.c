@@ -89,7 +89,7 @@ PyObject * Struct_vectorcall(
  * What a class whose body writes __init__ allocates with. That class declined
  * the generated constructor, and fill_defaults went with it: a declared default
  * was never written, for the class and for every subclass, so
- * __struct_defaults__ advertised a value no instance would ever carry (#56).
+ * _struct_defaults_ advertised a value no instance would ever carry.
  * Writing them here means the __init__ runs over a struct that already holds
  * them and overwrites whatever it means to -- which is where a dataclass leaves
  * them too, on the class, readable.

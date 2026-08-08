@@ -10,6 +10,8 @@
 static int Struct_set_attribute(PyObject * self, PyObject * name, PyObject * value);
 static PyObject * Struct_get_field_names(PyObject * self, void * closure);
 static PyObject * Struct_get_defaults(PyObject * self, void * closure);
+static PyObject * Struct_get_fields_as_msgspec(PyObject * self, void * closure);
+static PyObject * Struct_get_defaults_as_msgspec(PyObject * self, void * closure);
 static PyObject * metadata_of(PyObject * self, enum struct_metadata which, char const * name);
 static PyGetSetDef Struct_getset[];
 
@@ -25,16 +27,36 @@ PyTypeObject StructMixin_Type = {
 	.tp_getset = Struct_getset,
 };
 
+/*
+ * A sunder for salix's own metadata, and the dunder beside it for msgspec's.
+ *
+ * The language reference reserves `__name__` for the interpreter and its
+ * implementation, and PEP 8 says never to invent one -- only to use a
+ * documented one. So the pair salix defines is `_struct_fields_`, and
+ * `__struct_fields__` is here because msgspec spells it that way and code
+ * written against msgspec reads it. Using another project's documented name is
+ * the half PEP 8 permits; minting one is not.
+ */
 static PyGetSetDef Struct_getset[] = {
 	{
-		.name = "__struct_fields__",
+		.name = "_struct_fields_",
 		.get = Struct_get_field_names,
 		.doc = "tuple of field names",
 	},
 	{
-		.name = "__struct_defaults__",
+		.name = "_struct_defaults_",
 		.get = Struct_get_defaults,
 		.doc = "tuple of trailing defaults",
+	},
+	{
+		.name = "__struct_fields__",
+		.get = Struct_get_fields_as_msgspec,
+		.doc = "tuple of field names, under msgspec's name for it",
+	},
+	{
+		.name = "__struct_defaults__",
+		.get = Struct_get_defaults_as_msgspec,
+		.doc = "tuple of trailing defaults, under msgspec's name for it",
 	},
 	{.name = NULL},
 };
@@ -117,11 +139,22 @@ static int Struct_set_attribute(
 	return RESULT_ERROR;
 }
 
-/* Two entry points because the getset table needs two; the answer is one. */
+/* Four entry points because the getset table names four attributes and hands
+ * the getter no way to tell which one was asked for; there are two answers. The
+ * name is spelled here rather than passed through `closure` so that a lookup
+ * that fails is refused under the name the caller used. */
 static PyObject * Struct_get_field_names(PyObject * const self, void * const closure) {
-	return metadata_of(self, STRUCT_FIELD_NAMES, "__struct_fields__");
+	return metadata_of(self, STRUCT_FIELD_NAMES, "_struct_fields_");
 }
 
 static PyObject * Struct_get_defaults(PyObject * const self, void * const closure) {
+	return metadata_of(self, STRUCT_DEFAULTS, "_struct_defaults_");
+}
+
+static PyObject * Struct_get_fields_as_msgspec(PyObject * const self, void * const closure) {
+	return metadata_of(self, STRUCT_FIELD_NAMES, "__struct_fields__");
+}
+
+static PyObject * Struct_get_defaults_as_msgspec(PyObject * const self, void * const closure) {
 	return metadata_of(self, STRUCT_DEFAULTS, "__struct_defaults__");
 }

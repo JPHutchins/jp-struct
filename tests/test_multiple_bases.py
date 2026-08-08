@@ -41,7 +41,7 @@ def test_a_fieldless_base_in_front_does_not_hide_the_fields_behind_it():
 
     instance = Both(1, 2, 3)
 
-    assert Both.__struct_fields__ == ("a", "b", "c")
+    assert Both._struct_fields_ == ("a", "b", "c")
     assert (instance.a, instance.b, instance.c) == (1, 2, 3)
     assert repr(instance) == "Both(a=1, b=2, c=3)"
 
@@ -58,7 +58,7 @@ def test_a_weakref_base_in_front_does_not_hide_them_either():
 
     instance = Both(1, 2)
 
-    assert Both.__struct_fields__ == ("a", "c")
+    assert Both._struct_fields_ == ("a", "c")
     assert (instance.a, instance.c) == (1, 2)
 
 
@@ -83,7 +83,7 @@ def test_the_layout_base_is_the_one_cpython_chose(bases):
 
     child = type(Struct)("Child", bases, {"__annotations__": {"c": int}})
 
-    assert child.__struct_fields__ == (*child.__base__.__struct_fields__, "c")
+    assert child._struct_fields_ == (*child.__base__._struct_fields_, "c")
 
 
 def test_the_order_of_the_bases_does_not_change_the_fields():
@@ -93,7 +93,7 @@ def test_the_order_of_the_bases_does_not_change_the_fields():
     class Backwards(WithFields, Fieldless):
         c: int
 
-    assert Forwards.__struct_fields__ == Backwards.__struct_fields__
+    assert Forwards._struct_fields_ == Backwards._struct_fields_
 
 
 def test_the_frozen_keyword_is_answered_by_any_base_with_fields():

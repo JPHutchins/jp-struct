@@ -49,7 +49,7 @@ def test_a_value_may_be_a_default(value):
     class Local(Struct):
         field: object = value
 
-    (stored,) = Local.__struct_defaults__
+    (stored,) = Local._struct_defaults_
 
     assert Local().field == value
     assert stored == value

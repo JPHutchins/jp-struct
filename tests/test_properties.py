@@ -80,7 +80,7 @@ def test_field_names_survive_a_round_trip(names):
     values = tuple(range(len(names)))
     instance = struct_class(*values)
 
-    assert instance.__struct_fields__ == tuple(names)
+    assert instance._struct_fields_ == tuple(names)
     assert instance.__match_args__ == tuple(names)
     assert tuple(getattr(instance, name) for name in names) == values
 

@@ -211,13 +211,13 @@ class TestMutableDefaults:
 
         shared.append([2])
 
-        assert Holder.__struct_defaults__[0] is not shared
+        assert Holder._struct_defaults_[0] is not shared
         assert Holder().xs == []
 
     def test_construction_and_inheritance_agree_after_that_mutation(self):
         """One copies and one refuses, so they have to be looking at the same
         thing -- the stored default, which the module-level alias no longer
-        reaches. `__struct_defaults__` still hands it out and #51 is where that
+        reaches. `_struct_defaults_` still hands it out and #51 is where that
         route is argued; what this pins is that the two agree.
         """
 
@@ -308,12 +308,12 @@ class TestMutableDefaults:
             v: object = value
 
         assert Holder().v is Holder().v
-        assert Holder.__struct_defaults__[0] is value
+        assert Holder._struct_defaults_[0] is value
 
     def test_a_body_init_does_not_exempt_the_declared_default(self):
         """Its constructor never reads the default, so nothing is shared -- but
         the declaration is still a promise the class makes through
-        __struct_defaults__, and dataclasses refuses it under init=False for the
+        _struct_defaults_, and dataclasses refuses it under init=False for the
         same reason. The message names both hooks because __post_init__ is not
         one of them here: a body __init__ displaces the generated constructor,
         and run_post_init goes with it.

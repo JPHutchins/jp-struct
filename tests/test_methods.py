@@ -562,7 +562,7 @@ class TestNameCollisions:
         """
 
         Collide = self.colliding_method()
-        (default,) = Collide.__struct_defaults__
+        (default,) = Collide._struct_defaults_
 
         assert callable(default)
         assert Collide().x is default
@@ -575,7 +575,7 @@ class TestNameCollisions:
             def y(self) -> str:
                 return "property"
 
-        (default,) = CollideProp.__struct_defaults__
+        (default,) = CollideProp._struct_defaults_
 
         assert isinstance(default, property)
         assert CollideProp().y is default

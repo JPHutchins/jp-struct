@@ -100,16 +100,23 @@ def set_field_will_not_take_keywords() -> None:
 
 
 def the_field_names_may_not_be_assigned_on_the_class() -> None:
-    Point.__struct_fields__ = ("z",)  # type: ignore[misc]
+    Point._struct_fields_ = ("z",)  # type: ignore[misc]
 
 
 def the_defaults_may_not_be_assigned_on_the_class() -> None:
-    Point.__struct_defaults__ = (9,)  # type: ignore[misc]
+    Point._struct_defaults_ = (9,)  # type: ignore[misc]
 
 
 def the_field_names_may_not_be_assigned_on_an_instance() -> None:
-    Point(1, "two").__struct_fields__ = ("z",)  # type: ignore[misc]
+    Point(1, "two")._struct_fields_ = ("z",)  # type: ignore[misc]
 
 
 def the_defaults_may_not_be_assigned_on_an_instance() -> None:
+    Point(1, "two")._struct_defaults_ = (9,)  # type: ignore[misc]
+
+
+def msgspecs_names_for_them_may_not_be_assigned_either() -> None:
+    Point.__struct_fields__ = ("z",)  # type: ignore[misc]
+    Point.__struct_defaults__ = (9,)  # type: ignore[misc]
+    Point(1, "two").__struct_fields__ = ("z",)  # type: ignore[misc]
     Point(1, "two").__struct_defaults__ = (9,)  # type: ignore[misc]

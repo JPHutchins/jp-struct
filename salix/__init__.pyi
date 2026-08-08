@@ -4,6 +4,8 @@ from typing_extensions import dataclass_transform
 
 @dataclass_transform(frozen_default=True)
 class Struct:
+    _struct_fields_: Final[tuple[str, ...]]
+    _struct_defaults_: Final[tuple[Any, ...]]
     __struct_fields__: Final[tuple[str, ...]]
     __struct_defaults__: Final[tuple[Any, ...]]
     def __init_subclass__(

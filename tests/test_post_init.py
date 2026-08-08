@@ -34,7 +34,7 @@ def test_a_struct_without_one_is_unaffected():
     class Plain(Struct):
         x: int
 
-    assert Plain.__struct_fields__ == ("x",)
+    assert Plain._struct_fields_ == ("x",)
     assert Plain(1).x == 1
 
 
