@@ -219,19 +219,42 @@ def named(bases: tuple[type, ...]) -> str:
     return " + ".join(base.__name__ for base in bases)
 
 
-ALL = tuple(
-    (bases, outcome) for bases in ARRANGEMENTS if is_a_class(outcome := build(bases))
-)
+OUTCOMES = tuple((bases, build(bases)) for bases in ARRANGEMENTS)
+ALL = tuple((bases, outcome) for bases, outcome in OUTCOMES if is_a_class(outcome))
+ALONE = {
+    shape: built for shape in SHAPES if is_a_class(built := build((shape,)))
+}
 
 
 def test_the_sweep_reaches_every_shape_at_both_widths():
-    """A guard on the sweep itself. A change that made some shape unbuildable
-    in every arrangement would stop testing it without a word, and every test
-    below would stay green over the space that was left.
-    """
-
     assert {base for bases, _ in ALL for base in bases} == set(SHAPES)
     assert {len(bases) for bases, _ in ALL} == {2, 3}
+    assert set(ALONE) == set(SHAPES)
+
+
+def test_salix_refuses_no_arrangement_of_these_shapes():
+    """The guard that keeps the sweep from shrinking in silence.
+
+    Every combination here is buildable or Python's own to refuse, so a change
+    that makes salix decline one takes it out of `ALL` -- and every invariant
+    below would stay green over the smaller space, which is the sampling this
+    file exists to stop. Asserting the shapes each appear *somewhere* does not
+    catch that: they would still each appear somewhere.
+
+    It guards the `PYTHONS_OWN` substring test as well. That is a heuristic
+    over CPython's wording, and a release that rephrases an MRO or lay-out
+    conflict would start classifying its own refusals as salix's -- which shows
+    up here as a refusal rather than as a combination quietly leaving the
+    sweep.
+    """
+
+    refusals = [
+        f"{named(bases)}: {outcome.message}"
+        for bases, outcome in OUTCOMES
+        if isinstance(outcome, Refused)
+    ]
+
+    assert refusals == []
 
 
 def test_the_fields_are_the_layout_bases_followed_by_the_new_one():
@@ -299,22 +322,44 @@ def test_a_value_that_compares_by_value_and_can_still_move_is_unhashable():
     hash: a key whose hash moves is not a key.
     """
 
+    violations = []
+
+    for bases, cls in ALL:
+        behaviour = observe(cls)
+
+        if behaviour.equality == "value" and not behaviour.frozen and cls.__hash__ is not None:
+            violations.append(named(bases))
+
+    assert violations == []
+
+
+def test_a_frozen_promise_is_kept_by_every_arrangement_that_inherits_one():
+    """What the class records against what it does, for the one option the
+    differential deliberately excludes.
+
+    `frozen` is not the first base's preference but a promise every fielded
+    base made separately, so the rule is the strongest of them: frozen if the
+    first base alone is, or if any base with fields is. Nothing else here
+    compares that to behaviour -- a write and a delete are only checked against
+    each other, and the unhashable rule fires only for value equality -- so a
+    regression in the forced rebind could leave a class recording the promise
+    and taking every write, with all of it green.
+    """
+
+    def promised(bases: tuple[type, ...]) -> bool:
+        return any(base.__struct_fields__ and observe(base).frozen for base in bases)
+
     violations = [
-        named(bases)
+        f"{named(bases)}: frozen={observe(cls).frozen} against a promise"
         for bases, cls in ALL
-        if observe(cls).equality == "value"
-        and not observe(cls).frozen
-        and cls.__hash__ is not None
+        if observe(cls).frozen != (observe(ALONE[bases[0]]).frozen or promised(bases))
     ]
 
     assert violations == []
 
 
-ORDERS_ALONE = {
-    shape: observe(alone).order
-    for shape in SHAPES
-    if is_a_class(alone := build((shape,)))
-}
+ORDERS_ALONE = {shape: observe(built).order for shape, built in ALONE.items()}
+EQUALITY_ALONE = {shape: observe(built).equality for shape, built in ALONE.items()}
 
 
 def contested(bases: tuple[type, ...], name: str) -> bool:
@@ -350,14 +395,50 @@ SOUND_EQ, CONTESTED_EQ = halves("__eq__")
 SOUND_ORDER, CONTESTED_ORDER = halves("__lt__")
 
 
+def answers_equal_to_everything(bases: tuple[type, ...]) -> bool:
+    """Whether the later base the lookup takes `__eq__` from is one that calls
+    two differing instances equal.
+
+    The hash disagreement needs that much: a later base binding `__eq__` is
+    what puts the record and the behaviour at odds, but a binder that compares
+    by *identity* still calls two differing instances unequal, so no pair of
+    equal-and-differently-hashed objects exists to find. Only a permissive
+    binder produces one.
+
+    Without the clause the bucket is 224 wide to hold 112 real violations, and
+    the other half sits in a test that is expected to fail, where a regression
+    would be invisible.
+    """
+
+    if "__eq__" in vars(bases[0]):
+        return False
+
+    binder = next((base for base in bases[1:] if "__eq__" in vars(base)), None)
+
+    return binder is not None and EQUALITY_ALONE.get(binder) == "everything"
+
+
+SOUND_HASH = tuple(
+    (bases, cls)
+    for bases, cls in ALL
+    if not (answers_equal_to_everything(bases) and cls.__hash__ is not None)
+)
+CONTESTED_HASH = tuple(
+    (bases, cls)
+    for bases, cls in ALL
+    if answers_equal_to_everything(bases) and cls.__hash__ is not None
+)
+
+
 @pytest.mark.parametrize(
     ("sound", "broken"),
     [
         (SOUND_REPR, CONTESTED_REPR),
         (SOUND_EQ, CONTESTED_EQ),
         (SOUND_ORDER, CONTESTED_ORDER),
+        (SOUND_HASH, CONTESTED_HASH),
     ],
-    ids=["__repr__", "__eq__", "__lt__"],
+    ids=["__repr__", "__eq__", "__lt__", "__hash__"],
 )
 def test_both_halves_of_the_split_are_reached(sound, broken):
     """An empty sound half would make the test over it vacuous. An empty broken
@@ -415,7 +496,34 @@ def test_equal_instances_hash_equal():
     that compare equal and hash differently cannot find each other in a dict.
     """
 
-    assert hash_disagreements(SOUND_EQ) == []
+    assert hash_disagreements(SOUND_HASH) == []
+
+
+@pytest.mark.parametrize(
+    ("broken", "violations"),
+    [
+        (CONTESTED_REPR, lambda rows: behaviour_differs_from_the_first_base_alone(rows, "repr")),
+        (CONTESTED_EQ, lambda rows: behaviour_differs_from_the_first_base_alone(rows, "equality")),
+        (CONTESTED_ORDER, lambda rows: behaviour_differs_from_the_first_base_alone(rows, "order")),
+        (CONTESTED_HASH, hash_disagreements),
+    ],
+    ids=["__repr__", "__eq__", "__lt__", "__hash__"],
+)
+def test_every_contested_combination_really_is_broken(broken, violations):
+    """The half of the split the strict xfails cannot police, and the reason
+    each bucket is narrowed until it is exact.
+
+    An xfail over a bucket where everything already fails emits one bit: it
+    flips only when the bucket becomes *entirely* clean. A partial fix, or a
+    new violation among combinations that were sound, leaves it just as failed
+    and just as green. Asserting the bucket is wholly broken is the other
+    bound, and between them the count cannot move without a test noticing.
+
+    Delete this with the four xfails below when #76 lands; they describe the
+    same defect from opposite sides.
+    """
+
+    assert len(violations(broken)) == len(broken)
 
 
 @pytest.mark.xfail(strict=True, reason="#76: the record and the MRO disagree")
@@ -435,7 +543,7 @@ def test_ordering_is_the_first_struct_bases_when_a_later_one_binds_it():
 
 @pytest.mark.xfail(strict=True, reason="#76: a later base's __eq__ against salix's hash")
 def test_equal_instances_hash_equal_when_a_later_base_answers_equality():
-    assert hash_disagreements(CONTESTED_EQ) == []
+    assert hash_disagreements(CONTESTED_HASH) == []
 
 
 @pytest.mark.xfail(strict=True, reason="#77: the frozen pin is armed from one base and directed by another")
@@ -465,11 +573,16 @@ def test_the_weakref_option_and_the_slot_agree():
     """CPython cannot take an inherited `__weakref__` away, so `weakref=False`
     over a base that has one is a request salix cannot honour -- and accepting
     it silently leaves the class recording one answer and giving another.
+
+    `Weak` alone is in here beside the arrangements because the single base is
+    the smallest form of it: `class C(Weak, weakref=False)` builds today and
+    the reference still works. A fix aimed only at the multi-base reading would
+    turn every other case here red and leave that one passing unexercised.
     """
 
     violations = []
 
-    for bases, cls in ALL:
+    for bases, cls in (*ALL, *(((shape,), built) for shape, built in ALONE.items())):
         without = build((cls,), field="fresh", weakref=False)
 
         if not is_a_class(without):
@@ -479,3 +592,16 @@ def test_the_weakref_option_and_the_slot_agree():
             violations.append(named(bases))
 
     assert violations == []
+
+
+def test_a_single_base_asking_to_drop_an_inherited_weakref_slot_is_the_same_bug():
+    """#78's smallest form, stated on its own so that it is covered whether or
+    not the sweep above still reaches it. The slot is inherited and cannot be
+    removed, so the request is one salix should refuse rather than accept and
+    drop; today it is accepted and dropped.
+    """
+
+    without = build((Weak,), field="fresh", weakref=False)
+
+    assert is_a_class(without)
+    assert observe(without).weakref is True
