@@ -74,8 +74,9 @@ static PyObject * ordering_result(PyObject * const self, PyObject * const other,
 	}
 
 	for (Py_ssize_t i = 0; i < self_type->struct_field_count; ++i) {
-		PY_OWNED(mine, Py_NewRef(struct_slot_or_none(self_type, self, i)));
-		PY_OWNED(theirs, Py_NewRef(struct_slot_or_none(other_type, other, i)));
+		struct slot_pair const pair = struct_slot_pair_ref(self_type, self, other_type, other, i);
+		PY_OWNED(mine, pair.mine);
+		PY_OWNED(theirs, pair.theirs);
 		int const equal = PyObject_RichCompareBool(mine, theirs, Py_EQ);
 
 		if (equal == COMPARISON_ERROR) {
@@ -114,8 +115,9 @@ static enum comparison names_equal(
 	);
 }
 
-/* Borrowed slots are sound here and not in ordering_result: the comparison is
- * the last use of either pointer. */
+/* Owned for the same reason ordering_result's are: the equality probe runs
+ * arbitrary Python, which can rebind either slot, and on a free-threaded build
+ * can free what a borrowed pointer names. */
 static enum comparison values_equal(
 	StructType const * const self_type,
 	PyObject * const self,
@@ -123,11 +125,10 @@ static enum comparison values_equal(
 	PyObject * const other
 ) {
 	for (Py_ssize_t i = 0; i < self_type->struct_field_count; ++i) {
-		int const equal = PyObject_RichCompareBool(
-			struct_slot_or_none(self_type, self, i),
-			struct_slot_or_none(other_type, other, i),
-			Py_EQ
-		);
+		struct slot_pair const pair = struct_slot_pair_ref(self_type, self, other_type, other, i);
+		PY_OWNED(mine, pair.mine);
+		PY_OWNED(theirs, pair.theirs);
+		int const equal = PyObject_RichCompareBool(mine, theirs, Py_EQ);
 
 		if (equal != COMPARISON_EQUAL) {
 			return equal;

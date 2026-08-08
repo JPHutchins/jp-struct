@@ -87,19 +87,127 @@ static inline PyObject * * struct_slot(
 }
 
 /*
- * A slot stays NULL until something writes it, which is observable on a
- * half-built struct. Reading it as None keeps hash and == total instead of
- * making each one re-derive the guard; repr wants to see the NULL, so it
- * reads the slot directly.
+ * Py_BEGIN_CRITICAL_SECTION arrived in 3.13, and expands to a bare scope on a
+ * build with the GIL -- which is every build below it.
+ *
+ * A macro because a critical section is a lexical scope holding a stack frame
+ * the interpreter links into a per-thread stack; no function can open one and
+ * return with it still open. Same reason owned.h is macros.
  */
-static inline PyObject * struct_slot_or_none(
+#if PY_VERSION_HEX < 0x030D0000
+#	define STRUCT_BEGIN_CRITICAL_SECTION(object) {
+#	define STRUCT_END_CRITICAL_SECTION() }
+#	define STRUCT_BEGIN_CRITICAL_SECTION2(first, second) {
+#	define STRUCT_END_CRITICAL_SECTION2() }
+#else
+#	define STRUCT_BEGIN_CRITICAL_SECTION(object) Py_BEGIN_CRITICAL_SECTION(object)
+#	define STRUCT_END_CRITICAL_SECTION() Py_END_CRITICAL_SECTION()
+#	define STRUCT_BEGIN_CRITICAL_SECTION2(first, second) Py_BEGIN_CRITICAL_SECTION2(first, second)
+#	define STRUCT_END_CRITICAL_SECTION2() Py_END_CRITICAL_SECTION2()
+#endif
+
+/* One field from each of two instances, for the readers that walk them in
+ * pairs. */
+struct slot_pair {
+	PyObject * mine;
+	PyObject * theirs;
+};
+
+/*
+ * A new reference to a field, taken under the same lock the writer takes.
+ *
+ * #7 made the write side safe by going through PyMember_SetOne, which holds a
+ * critical section on the instance over the store and defers the release past
+ * the end of it. Every reader here loaded the slot and then increffed what it
+ * found, which is two steps with a window between them: on a free-threaded
+ * build a concurrent write frees the pointer inside that window, and repr and
+ * == segfault. Measured, 3.14t, four writers and three readers of one kind:
+ * `repr` exited 134/139/134 and `==` 139/134/134, while the same loop reading
+ * through CPython's own member descriptor survived every time. #46.
+ *
+ * Every acquisition is in this file, so a fifth reader cannot forget one. The
+ * macros are a bare scope on a build with the GIL, so all three of these are
+ * the same load and incref they always were there.
+ *
+ * What a reader gets is per-slot atomicity, not a snapshot of the struct: a
+ * write landing between two of repr's fields renders a pair the object never
+ * held. That is what reading two member descriptors in a row gives as well.
+ *
+ * Hash is the exception, and the only one: its loop stays in C, so one
+ * acquisition spans the whole of it and what it hashes is a state the struct
+ * really held. repr and the comparisons run PyObject_Repr and
+ * PyObject_RichCompareBool between fields, and a section held across arbitrary
+ * Python is suspended the moment the thread detaches -- so hoisting one around
+ * those loops would read as a guarantee and not be one.
+ *
+ * A slot stays NULL until something writes it, which is observable on a
+ * half-built struct, and this hands that back as NULL: repr is the caller that
+ * renders it.
+ */
+static inline PyObject * struct_slot_ref(
 	StructType const * const type,
 	PyObject * const self,
 	Py_ssize_t const index
 ) {
-	PyObject * const value = *struct_slot(type, self, index);
+	PyObject * value;
 
-	return value != NULL ? value : Py_None;
+	STRUCT_BEGIN_CRITICAL_SECTION(self);
+	value = Py_XNewRef(*struct_slot(type, self, index));
+	STRUCT_END_CRITICAL_SECTION();
+
+	return value;
+}
+
+/*
+ * Both sides of one field, under a single acquisition covering both instances.
+ * The comparison paths walk them in pairs, and one section where there were two
+ * is the whole of what the lock can be made to cost them: 3.14t, an eight-field
+ * struct, `a == b` 134.5ns per field-pair section against 110.7 for one.
+ *
+ * Reading an unwritten slot as None keeps == total instead of making each
+ * caller re-derive the guard.
+ */
+static inline struct slot_pair struct_slot_pair_ref(
+	StructType const * const self_type,
+	PyObject * const self,
+	StructType const * const other_type,
+	PyObject * const other,
+	Py_ssize_t const index
+) {
+	PyObject * mine;
+	PyObject * theirs;
+
+	STRUCT_BEGIN_CRITICAL_SECTION2(self, other);
+	mine = *struct_slot(self_type, self, index);
+	theirs = *struct_slot(other_type, other, index);
+	mine = Py_NewRef(mine != NULL ? mine : Py_None);
+	theirs = Py_NewRef(theirs != NULL ? theirs : Py_None);
+	STRUCT_END_CRITICAL_SECTION2();
+
+	return (struct slot_pair){.mine = mine, .theirs = theirs};
+}
+
+/*
+ * Every field into `values`, which must be a tuple of struct_field_count and
+ * whose items must be unset. One acquisition rather than one per field, and so
+ * a real snapshot -- hash is the reader that can have both, because nothing in
+ * this loop calls back into Python. 3.14t, eight fields: 111.4ns to 81.1,
+ * against 77.5 for the unsynchronised read this replaced.
+ */
+static inline void struct_slots_ref_or_none_into(
+	StructType const * const type,
+	PyObject * const self,
+	PyObject * const values
+) {
+	STRUCT_BEGIN_CRITICAL_SECTION(self);
+
+	for (Py_ssize_t i = 0; i < type->struct_field_count; ++i) {
+		PyObject * const value = *struct_slot(type, self, i);
+
+		PyTuple_SET_ITEM(values, i, Py_NewRef(value != NULL ? value : Py_None));
+	}
+
+	STRUCT_END_CRITICAL_SECTION();
 }
 
 /* Fields below this index have no default and must be supplied by the caller. */
