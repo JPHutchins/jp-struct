@@ -369,15 +369,16 @@ def test_a_value_that_compares_by_value_and_can_still_move_is_unhashable():
     assert violations == []
 
 
-def test_a_weakref_slot_on_any_base_reaches_the_class():
-    """The rule `inherited_options` states in prose and nothing asserted: the
-    slot is a fact about every base, not a preference of the first.
+def test_a_class_is_weak_referenceable_only_where_its_bases_make_it_so():
+    """A class supports weakref exactly when one of its bases carries the slot
+    -- no more.
 
-    Without it the whole multi-base weakref surface was one strict xfail, which
-    emits a single bit -- so a regression that stopped combinations inheriting
-    the slot would take them *out* of that xfail's violation list and leave it
-    failing exactly as expected, with nothing red. This is the direction that
-    makes the bucket's size mean something.
+    The "no less" half is CPython's and not worth claiming: an inherited
+    `__weakref__` cannot be dropped, and a class that tried would be refused at
+    build time and caught by the size pin. What is salix's, and what this
+    catches, is the *other* direction -- a class becoming weak-referenceable
+    when nothing gave it a slot, whether by `build_slots` appending one over a
+    base that already has it or by a struct class growing a `__dict__`.
     """
 
     def has_slot(cls: type) -> bool:
@@ -386,9 +387,34 @@ def test_a_weakref_slot_on_any_base_reaches_the_class():
     violations = [
         f"{named(bases)}: ref={observe(cls).weakref} slot={has_slot(cls)}"
         for bases, cls in ALL
-        if observe(cls).weakref != any(has_slot(base) for base in bases)
-        or has_slot(cls) != observe(cls).weakref
+        if observe(cls).weakref and not any(has_slot(base) for base in bases)
     ]
+
+    assert violations == []
+
+
+def test_a_frozen_class_that_compares_by_value_hashes_by_value():
+    """The direction the rest of the hash surface cannot reach.
+
+    `hash_disagreements` needs two *equal* instances, and a frozen value-equal
+    class never produces a pair from differing constructor arguments; the
+    unhashable rule skips frozen classes outright. So a regression that made
+    every eq=True class unhashable, or hashed frozen ones by identity, passed
+    the whole sweep -- 290 combinations with nothing said about them.
+    """
+
+    violations = []
+
+    for bases, cls in ALL:
+        seen = observe(cls)
+
+        if not (seen.frozen and seen.equality == "value"):
+            continue
+
+        if cls.__hash__ is None:
+            violations.append(f"{named(bases)}: unhashable")
+        elif hash(instance(cls)) != hash(instance(cls)):
+            violations.append(f"{named(bases)}: equal instances hash differently")
 
     assert violations == []
 
@@ -514,12 +540,8 @@ def behaviour_differs_from_the_first_base_alone(
     violations = []
 
     for bases, multi in combinations:
-        alone = build((bases[0],))
-
-        if not is_a_class(alone):
-            continue
-
-        together, apart = getattr(observe(multi), field), getattr(observe(alone), field)
+        together = getattr(observe(multi), field)
+        apart = getattr(BEHAVIOUR_ALONE[bases[0]], field)
 
         if together != apart:
             violations.append(f"{named(bases)}: {together} against {apart} alone")
@@ -604,13 +626,35 @@ def test_equal_instances_hash_equal_when_a_later_base_answers_equality():
     assert hash_disagreements(CONTESTED_HASH) == []
 
 
-@pytest.mark.xfail(strict=True, reason="#77: the frozen pin is armed from one base and directed by another")
-def test_the_frozen_pin_does_not_depend_on_the_order_of_the_bases():
-    """Whether a class may be frozen is a question about which of its bases
-    made a promise, and no ordering of the same bases changes the answer.
+def inherits_a_different_frozen_reversed(bases: tuple[type, ...]) -> bool:
+    """Whether reversing these bases changes what `frozen` they inherit, in a
+    way `options_read` can act on.
+
+    Two clauses, because the refusal needs both. `inherited.frozen` is the
+    first struct base's, strengthened by any *fielded* frozen base -- so it can
+    differ between an ordering and its reverse. And the refusal only fires when
+    the layout base is constraining, which means some base has fields: an
+    all-fieldless arrangement inherits a different frozen and is accepted both
+    ways regardless.
+
+    Leaving the second clause out puts 324 orderings in the bucket to hold 188
+    real ones.
     """
 
-    violations = []
+    reversed_bases = tuple(reversed(bases))
+
+    def inherited(order: tuple[type, ...]) -> bool:
+        return FROZEN_ALONE[order[0]] or any(
+            base.__struct_fields__ and FROZEN_ALONE[base] for base in order
+        )
+
+    return any(base.__struct_fields__ for base in bases) and inherited(
+        bases
+    ) != inherited(reversed_bases)
+
+
+def frozen_refusals_that_depend_on_order() -> list[str]:
+    asymmetric = []
 
     for bases in ARRANGEMENTS:
         for wanted in (True, False):
@@ -621,9 +665,41 @@ def test_the_frozen_pin_does_not_depend_on_the_order_of_the_bases():
                 continue
 
             if isinstance(forwards, Refused) != isinstance(backwards, Refused):
-                violations.append(f"{named(bases)} frozen={wanted}")
+                asymmetric.append(f"{named(bases)} frozen={wanted}")
 
-    assert violations == []
+    return asymmetric
+
+
+FROZEN_AT_RISK = tuple(
+    (bases, wanted)
+    for bases in ARRANGEMENTS
+    for wanted in (True, False)
+    if inherits_a_different_frozen_reversed(bases)
+    and not isinstance(build(bases, frozen=wanted), Impossible)
+    and not isinstance(build(tuple(reversed(bases)), frozen=wanted), Impossible)
+)
+
+
+@pytest.mark.xfail(strict=True, reason="#77: the frozen pin is armed from one base and directed by another")
+def test_the_frozen_pin_does_not_depend_on_the_order_of_the_bases():
+    """Whether a class may be frozen is a question about which of its bases
+    made a promise, and no ordering of the same bases changes the answer.
+    """
+
+    assert frozen_refusals_that_depend_on_order() == []
+
+
+def test_every_order_dependent_frozen_refusal_really_is_one():
+    """#77's bucket bound, the last of the four this file owes.
+
+    Without it a partial fix -- one that settles the six width-2 pairs and
+    leaves the 182 width-3 arrangements -- keeps the xfail above failing
+    exactly as expected, and the tail goes unmentioned.
+
+    Delete this with the xfail when #77 lands.
+    """
+
+    assert len(frozen_refusals_that_depend_on_order()) == len(FROZEN_AT_RISK)
 
 
 WITH_A_SLOT = tuple(
