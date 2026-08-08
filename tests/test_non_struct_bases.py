@@ -261,6 +261,32 @@ def test_a_base_whose_equality_cannot_be_looked_up_fails_the_class():
             y: object = 0
 
 
+def test_only_the_equality_is_read_off_a_base_that_did_not_supply_one():
+    """Every attribute read off a co-base is a class that can fail to define,
+    so the walk reads what the decision turns on and nothing else.
+
+    A base supplying no `__eq__` has already answered -- it adds nothing to the
+    lookup -- so its `__hash__` and `__ne__` are never asked for, and a
+    descriptor raising under either of those names cannot stop a class that
+    salix was going to answer for anyway.
+    """
+
+    class RaisingHash:
+        __hash__ = Raising()  # type: ignore[assignment]
+
+    class RaisingNotEqual:
+        __ne__ = Raising()  # type: ignore[assignment]
+
+    class H(RaisingHash, Base):
+        y: object = 0
+
+    class N(RaisingNotEqual, Base):
+        y: object = 0
+
+    assert hash(H(1, 0)) == hash((1, 0))
+    assert hash(N(1, 0)) == hash((1, 0))
+
+
 def test_a_class_that_throws_that_equality_away_is_not_asked_for_it():
     """The bases are read only where the answer can be used.
 

@@ -476,10 +476,20 @@ static struct equality_source equality_from_the_co_bases(
 ) {
 	PyTypeObject * const objects_type = &PyBaseObject_Type;
 	PY_OWNED(objects_equal, PyObject_GetAttrString((PyObject *) objects_type, "__eq__"));
+
+	if (objects_equal == NULL) {
+		return (struct equality_source){.tag = EQUALITY_FAILED};
+	}
+
 	PY_OWNED(mixin_equal, PyObject_GetAttrString((PyObject *) &StructMixin_Type, "__eq__"));
+
+	if (mixin_equal == NULL) {
+		return (struct equality_source){.tag = EQUALITY_FAILED};
+	}
+
 	PY_OWNED(objects_not_equal, PyObject_GetAttrString((PyObject *) objects_type, "__ne__"));
 
-	if (objects_equal == NULL || mixin_equal == NULL || objects_not_equal == NULL) {
+	if (objects_not_equal == NULL) {
 		return (struct equality_source){.tag = EQUALITY_FAILED};
 	}
 
@@ -521,43 +531,34 @@ static struct equality_source base_equality(
 	PyObject * const mixin_equal,
 	PyObject * const objects_not_equal
 ) {
-	/* One at a time, and each checked before the next is asked for: a lookup
-	 * that raised leaves the exception set, and calling back into the API with
-	 * one pending loses it -- which showed up on 3.10 through 3.12 as
-	 * `_StructMeta returned NULL without setting an exception`. */
+	/* Nothing beyond __eq__ is read unless the answer turns on it. A base that
+	 * did not supply the equality has nothing else this decision needs, and
+	 * every attribute read here runs whatever the base put under the name --
+	 * each one being a class that fails to define where it used to build. */
 	PY_OWNED(equality, PyObject_GetAttrString(base, "__eq__"));
 
 	if (equality == NULL) {
 		return (struct equality_source){.tag = EQUALITY_FAILED};
 	}
 
-	PY_OWNED(hashing, PyObject_GetAttrString(base, "__hash__"));
-
-	if (hashing == NULL) {
-		return (struct equality_source){.tag = EQUALITY_FAILED};
+	if (equality == objects_equal || equality == mixin_equal) {
+		return (struct equality_source){.tag = EQUALITY_RESOLVED, .from_a_body = false};
 	}
 
+	/* Asked only after the one before it was checked: a lookup that raised
+	 * leaves the exception set, and calling back into the API with one pending
+	 * loses it -- which showed up on 3.10 through 3.12 as `_StructMeta returned
+	 * NULL without setting an exception`. */
 	PY_OWNED(inequality, PyObject_GetAttrString(base, "__ne__"));
 
 	if (inequality == NULL) {
 		return (struct equality_source){.tag = EQUALITY_FAILED};
 	}
 
-	bool const answered = equality != objects_equal && equality != mixin_equal;
-
-	/* A base that is itself unhashable settles the question without answering
-	 * it. Python sets __hash__ to None for a body that defines __eq__ and no
-	 * __hash__, so `__eq__ = object.__eq__` written in a body reads as object's
-	 * here and is a definition all the same. Either way a class deriving from
-	 * an unhashable one is unhashable, and leaving the hash alone is what gets
-	 * that; binding a structural one over it would be salix making a class
-	 * hashable that Python says is not. */
-	bool const refuses_hashing = hashing == Py_None;
-
 	return (struct equality_source){
 		.tag = EQUALITY_RESOLVED,
-		.from_a_body = answered || refuses_hashing,
-		.needs_derived_not_equal = answered && inequality == objects_not_equal,
+		.from_a_body = true,
+		.needs_derived_not_equal = inequality == objects_not_equal,
 	};
 }
 
