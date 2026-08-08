@@ -120,3 +120,21 @@ def msgspec_names_for_them_may_not_be_assigned_either() -> None:
     Point.__struct_defaults__ = (9,)  # type: ignore[misc]
     Point(1, "two").__struct_fields__ = ("z",)  # type: ignore[misc]
     Point(1, "two").__struct_defaults__ = (9,)  # type: ignore[misc]
+
+
+class AFieldMayNotTakeOneOfTheMetadataNames(Struct):
+    """Declaring the four names Final is what makes a checker refuse them as
+    field names, and that refusal is deliberate rather than a side effect.
+
+    The runtime still builds this class -- #82 is the decision about whether it
+    should -- and until that is settled the two answers differ: a checker says
+    no and salix says yes. The direction is the safe one, since the class it
+    builds reports the metadata when read from the class and the field when
+    read from an instance, so the refusal here is the reservation being real
+    somewhere. Stated in this file so that it is checked rather than assumed.
+    """
+
+    _struct_fields_: int  # type: ignore[assignment,misc]
+    _struct_defaults_: int  # type: ignore[assignment,misc]
+    __struct_fields__: int  # type: ignore[assignment,misc]
+    __struct_defaults__: int  # type: ignore[assignment,misc]

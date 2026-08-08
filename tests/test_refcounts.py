@@ -98,14 +98,13 @@ def test_an_uncopied_default_is_shared_by_every_instance():
     name says which of the two it pins, now that both exist.
     """
 
-    default = Defaulted._struct_defaults_
     sentinel = Defaulted(None).optional
     before = sys.getrefcount(sentinel)
     instances = [Defaulted(None) for _ in range(10)]
 
     assert sys.getrefcount(sentinel) == before + 10
 
-    del instances, default
+    del instances
 
     assert sys.getrefcount(sentinel) == before
 
