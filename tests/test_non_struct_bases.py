@@ -99,8 +99,13 @@ def test_a_base_that_pairs_them_keeps_its_pair():
 
 
 def test_a_base_with_no_equality_of_its_own_decides_nothing():
-    """object's __eq__ is the absence of one, so the search passes over it and
-    the struct base behind still answers.
+    """object's __eq__ is the absence of one, so the struct base behind is what
+    answers.
+
+    Only the outcome is asserted, not that the search "passes over" the inert
+    base -- stopping there and continuing past it are indistinguishable from
+    outside when nothing follows. The test below is the one that tells them
+    apart, by putting a base that does answer behind the inert one.
     """
 
     class B(Inert, Base):
@@ -134,9 +139,16 @@ def test_the_struct_base_behind_it_still_answers_when_it_comes_first():
     class B(Base, Equal):
         y: object = 0
 
+    class Reversed(Equal, Base):
+        y: object = 0
+
     assert B.__eq__ is not Equal.__eq__
-    assert B(1, 0) != B(2, 0)
-    assert hash(B(1, 0)) == hash(B(1, 0))
+    assert Reversed.__eq__ is Equal.__eq__
+
+    # The same two bases, and the order is the whole difference.
+    assert (B(1, 0) == B(2, 0)) is False
+    assert (Reversed(1, 0) == Reversed(2, 0)) is True
+    assert hash(B(1, 0)) != hash(B(2, 0))
 
 
 def test_a_subclass_inherits_the_deferral():
@@ -441,3 +453,27 @@ def test_a_co_base_between_two_struct_bases_is_not_seen_either():
 
     assert B(1) == B(2)
     assert hash(B(1)) == hash(B(2))
+
+
+def test_equality_and_inequality_may_come_from_different_co_bases():
+    """`__ne__` is a separate question over the same bases, and reading it off
+    whichever base supplied `__eq__` answered about the wrong class.
+
+    Here the first co-base supplies equality and the second supplies
+    inequality, which is what plain Python resolves too -- so salix has nothing
+    to derive and must leave the second one's alone.
+    """
+
+    class NotEqual:
+        def __ne__(self, other: object) -> str:
+            return "from the second base"
+
+    class B(Equal, NotEqual, Base):
+        y: object = 0
+
+    class Plain(Equal, NotEqual):
+        pass
+
+    assert B.__ne__ is NotEqual.__ne__
+    assert Plain.__ne__ is NotEqual.__ne__
+    assert (B(1, 0) != B(2, 0)) == "from the second base"

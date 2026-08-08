@@ -58,7 +58,11 @@ static struct equality_source equality_from_the_co_bases(PyObject * bases, Py_ss
 static struct equality_source base_equality(
 	PyObject * base,
 	PyObject * objects_equal,
-	PyObject * mixin_equal,
+	PyObject * mixin_equal
+);
+static struct equality_source supplies_not_equal(
+	PyObject * bases,
+	Py_ssize_t first,
 	PyObject * objects_not_equal,
 	PyObject * mixin_not_equal
 );
@@ -513,20 +517,71 @@ static struct equality_source equality_from_the_co_bases(
 			};
 		}
 
-		struct equality_source const answer = base_equality(
-			base,
-			objects_equal,
-			mixin_equal,
-			objects_not_equal,
-			mixin_not_equal
-		);
+		struct equality_source const answer = base_equality(base, objects_equal, mixin_equal);
 
-		if (answer.tag == EQUALITY_FAILED || answer.from_a_body) {
+		if (answer.tag == EQUALITY_FAILED) {
 			return answer;
+		}
+
+		if (answer.from_a_body) {
+			struct equality_source const paired =
+				supplies_not_equal(bases, first, objects_not_equal, mixin_not_equal);
+
+			return (
+				paired.tag == EQUALITY_FAILED ? paired :
+				(struct equality_source){
+					.tag = EQUALITY_RESOLVED,
+					.from_a_body = true,
+					.needs_derived_not_equal = !paired.needs_derived_not_equal,
+				}
+			);
 		}
 	}
 
 	return (struct equality_source){.tag = EQUALITY_RESOLVED, .from_a_body = false};
+}
+
+/*
+ * Whether any co-base carries a __ne__ of its own, which is then the __ne__
+ * the class resolves and not salix's to replace.
+ *
+ * Asked over the same bases as the equality and separately from it, because
+ * the two can come from different ones: `class B(Equal, WeirdNotEqual, Base)`
+ * takes equality from the first and inequality from the second. Reading the
+ * __ne__ of whichever base supplied __eq__ answered about the wrong class, and
+ * the derived one went in over a pairing that was already there.
+ *
+ * `needs_derived_not_equal` carries "one was found" here; the caller inverts
+ * it, since salix derives one exactly when nobody else supplies it.
+ */
+static struct equality_source supplies_not_equal(
+	PyObject * const bases,
+	Py_ssize_t const first,
+	PyObject * const objects_not_equal,
+	PyObject * const mixin_not_equal
+) {
+	for (Py_ssize_t i = first; i < PyTuple_GET_SIZE(bases); ++i) {
+		PyObject * const base = PyTuple_GET_ITEM(bases, i);
+
+		if (is_struct_class(base)) {
+			break;
+		}
+
+		PY_OWNED(inequality, PyObject_GetAttrString(base, "__ne__"));
+
+		if (inequality == NULL) {
+			return (struct equality_source){.tag = EQUALITY_FAILED};
+		}
+
+		if (inequality != objects_not_equal && inequality != mixin_not_equal) {
+			return (struct equality_source){
+				.tag = EQUALITY_RESOLVED,
+				.needs_derived_not_equal = true,
+			};
+		}
+	}
+
+	return (struct equality_source){.tag = EQUALITY_RESOLVED, .needs_derived_not_equal = false};
 }
 
 /*
@@ -542,45 +597,20 @@ static struct equality_source equality_from_the_co_bases(
 static struct equality_source base_equality(
 	PyObject * const base,
 	PyObject * const objects_equal,
-	PyObject * const mixin_equal,
-	PyObject * const objects_not_equal,
-	PyObject * const mixin_not_equal
+	PyObject * const mixin_equal
 ) {
-	/* Nothing beyond __eq__ is read unless the answer turns on it. A base that
-	 * did not supply the equality has nothing else this decision needs, and
-	 * every attribute read here runs whatever the base put under the name --
-	 * each one being a class that fails to define where it used to build. */
+	/* Only __eq__, and only off a base that might supply it: every attribute
+	 * read here runs whatever the base put under the name, and each one is a
+	 * class that fails to define where it used to build. */
 	PY_OWNED(equality, PyObject_GetAttrString(base, "__eq__"));
 
 	if (equality == NULL) {
 		return (struct equality_source){.tag = EQUALITY_FAILED};
 	}
 
-	if (equality == objects_equal || equality == mixin_equal) {
-		return (struct equality_source){.tag = EQUALITY_RESOLVED, .from_a_body = false};
-	}
-
-	/* Asked only after the one before it was checked: a lookup that raised
-	 * leaves the exception set, and calling back into the API with one pending
-	 * loses it -- which showed up on 3.10 through 3.12 as `_StructMeta returned
-	 * NULL without setting an exception`. */
-	PY_OWNED(inequality, PyObject_GetAttrString(base, "__ne__"));
-
-	if (inequality == NULL) {
-		return (struct equality_source){.tag = EQUALITY_FAILED};
-	}
-
-	/* Neither object's nor the mixin's counts as a pairing the co-base made.
-	 * A co-base may itself derive from the mixin -- it is a permitted base --
-	 * and then its __ne__ resolves to the structural one, which is the thing
-	 * being displaced rather than a pair to leave alone. */
 	return (struct equality_source){
 		.tag = EQUALITY_RESOLVED,
-		.from_a_body = true,
-		.needs_derived_not_equal = (
-			inequality == objects_not_equal ||
-			inequality == mixin_not_equal
-		),
+		.from_a_body = equality != objects_equal && equality != mixin_equal,
 	};
 }
 
