@@ -40,6 +40,15 @@ class Inert:
     pass
 
 
+class Raising:
+    def __get__(self, instance: object, owner: type | None = None) -> object:
+        raise RuntimeError("no equality here")
+
+
+class Hostile:  # noqa: PLW1641 -- the __eq__ that raises is the shape
+    __eq__ = Raising()  # type: ignore[assignment]
+
+
 def test_a_non_struct_eq_ahead_of_the_struct_base_takes_the_hash_with_it():
     """The reported shape. Before, `len({B(1), B(2)}) == 2` for two instances
     that compared equal -- so neither could find the other in a dict.
@@ -211,12 +220,16 @@ def test_equality_and_inequality_agree_when_a_co_base_answers():
 
 
 def test_a_co_base_supplying_only_a_hash_still_gets_salixs():
-    """Deliberate, and the reason is that the pair has to agree.
+    """Deliberate, though not because the co-base's hash would be *wrong*: a
+    constant hash is a legal partner for structural equality, since the rule is
+    only that equal instances hash alike.
 
-    `Hashed` supplies no `__eq__`, so the struct base's structural equality is
-    what answers -- and a hash that ignores the fields cannot be the partner of
-    an equality that reads them. salix's own hash is bound over the co-base's
-    for the same reason it is bound at all.
+    The reason is that the co-base supplies no `__eq__`, so the struct base's
+    structural equality answers and salix owns the pair -- and its half is the
+    one that tells values apart.
+
+    Asserted as structural rather than merely "not the co-base's", which an
+    identity hash would satisfy too.
     """
 
     class Hashed:
@@ -226,8 +239,9 @@ def test_a_co_base_supplying_only_a_hash_still_gets_salixs():
         y: object = 0
 
     assert H(1, 0) == H(1, 0)
-    assert H.__hash__ is not Hashed.__hash__
     assert hash(H(1, 0)) == hash(H(1, 0))
+    assert hash(H(1, 0)) != hash(H(2, 0))
+    assert hash(H(1, 0)) == hash((1, 0))
 
 
 def test_a_base_whose_equality_cannot_be_looked_up_fails_the_class():
@@ -236,22 +250,31 @@ def test_a_base_whose_equality_cannot_be_looked_up_fails_the_class():
     Deciding the hash means reading each non-struct base's `__eq__`, and that
     runs whatever the base put under the name. A descriptor that raises used to
     go unnoticed, because the struct base was the only one consulted; now it
-    stops the class being defined. Propagating beats demoting here -- the same
-    class would raise from `==` on first use -- but it is a class that built
-    before, so it is pinned.
+    stops the class being defined. Propagating beats demoting here -- this
+    class raises from `==` on first use either way -- but it is a class that
+    built before, so it is pinned.
     """
-
-    class Raising:
-        def __get__(self, instance: object, owner: type | None = None) -> object:
-            raise RuntimeError("no equality here")
-
-    class Hostile:  # noqa: PLW1641 -- the __eq__ that raises is the shape
-        __eq__ = Raising()  # type: ignore[assignment]
 
     with pytest.raises(RuntimeError, match="no equality here"):
 
         class B(Hostile, Base):
             y: object = 0
+
+
+def test_a_class_that_throws_that_equality_away_is_not_asked_for_it():
+    """The bases are read only where the answer can be used.
+
+    `eq=False` rebinds all six comparison names into this class's own
+    namespace, so whatever the co-bases resolve is discarded -- and the
+    justification above does not carry here either, because `==` is object's
+    and never reaches the descriptor. Asking anyway refused a class with
+    nothing wrong with it.
+    """
+
+    class B(Hostile, Base, eq=False):
+        y: object = 0
+
+    assert B(1, 0) != B(1, 0)
 
 
 @pytest.mark.xfail(strict=True, reason="#76: a later struct base's body __eq__ is not seen")

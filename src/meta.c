@@ -28,12 +28,15 @@ struct member_lookup {
 struct equality_source {
 	enum { EQUALITY_RESOLVED, EQUALITY_FAILED } tag;
 	bool from_a_body;
-	/* Whether a non-struct base is what answered. A struct base that resolves a
-	 * body's __eq__ bound object's __ne__ into its own dict when it was built,
-	 * so a subclass inherits the pair and needs nothing; a co-base supplies the
-	 * equality with no __ne__ beside it, and the mixin's structural one is what
-	 * the lookup reaches next. */
-	bool from_a_co_base;
+	/* Whether this class has to bind the derived __ne__ itself.
+	 *
+	 * A struct base that resolves a body's __eq__ bound object's __ne__ into
+	 * its own dict when it was built, so a subclass inherits the pair. A
+	 * co-base that supplies __eq__ and its own __ne__ has already paired them,
+	 * and taking that pairing away is not salix's to do. It is only a co-base
+	 * supplying __eq__ *alone* that leaves the mixin's structural __ne__ as the
+	 * next thing the lookup finds. */
+	bool needs_derived_not_equal;
 };
 
 static int StructMeta_traverse(PyObject * self, visitproc visit, void * arg);
@@ -51,7 +54,13 @@ static PyObject * build_struct_class(
 static StructType * find_struct_base(PyObject * bases);
 static StructType * find_behaviour_base(PyObject * bases);
 static struct equality_source resolves_body_equality(PyObject * bases);
-static struct equality_source base_equality(PyObject * base, PyObject * objects, PyObject * salixs);
+static struct equality_source equality_from_the_co_bases(PyObject * bases, Py_ssize_t first);
+static struct equality_source base_equality(
+	PyObject * base,
+	PyObject * objects_equal,
+	PyObject * mixin_equal,
+	PyObject * objects_not_equal
+);
 static struct options inherited_options(PyObject * bases, StructType const * behaviour);
 static bool any_struct_base_is_mutable(PyObject * bases);
 static bool has_weakref_slot(StructType const * base);
@@ -66,7 +75,7 @@ static PyObject * build_class_namespace(
 	bool frozen_across_bases,
 	bool body_defines_eq,
 	bool inherits_body_eq,
-	bool equality_from_a_co_base
+	bool derive_not_equal
 );
 static PyObject * build_slots(PyObject * new_names, bool weakref);
 static enum result set_match_args(PyObject * namespace, PyObject * all_names, bool wanted);
@@ -77,7 +86,7 @@ static enum result apply_options(
 	bool frozen_across_bases,
 	bool body_defines_eq,
 	bool inherits_body_eq,
-	bool equality_from_a_co_base
+	bool derive_not_equal
 );
 static enum result rebind(PyObject * namespace, char const * const * names, bool from_mixin);
 static enum result bind_not_equal(PyObject * namespace, bool answered_by_a_body);
@@ -282,7 +291,17 @@ static PyObject * build_struct_class(
 	 * class that changes the eq option has salix's binding written into its own
 	 * namespace and that is what the lookup finds first. */
 	bool const body_defines_eq = PyDict_GetItemString(original_namespace, "__eq__") != NULL;
-	struct equality_source const inherited_equality = resolves_body_equality(bases);
+
+	/* Only asked when the answer can be used. A class that changes the eq
+	 * option has salix's binding written into its own namespace for all six
+	 * comparison names, so whatever the bases resolve is discarded -- and
+	 * asking anyway means reading every co-base's __eq__, which runs whatever
+	 * the co-base put under the name and can refuse a class that would
+	 * otherwise build. */
+	struct equality_source const inherited_equality = (
+		request.options.eq == inherited.eq ? resolves_body_equality(bases) :
+		(struct equality_source){.tag = EQUALITY_RESOLVED, .from_a_body = false}
+	);
 
 	if (inherited_equality.tag == EQUALITY_FAILED) {
 		field_plan_clear(&plan);
@@ -290,10 +309,7 @@ static PyObject * build_struct_class(
 		return NULL;
 	}
 
-	bool const inherits_body_eq = (
-		inherited_equality.from_a_body &&
-		request.options.eq == inherited.eq
-	);
+	bool const inherits_body_eq = inherited_equality.from_a_body;
 
 	PY_OWNED(
 		namespace,
@@ -307,7 +323,7 @@ static PyObject * build_struct_class(
 			request.options.frozen && any_struct_base_is_mutable(bases),
 			body_defines_eq,
 			inherits_body_eq,
-			inherited_equality.from_a_co_base
+			inherited_equality.needs_derived_not_equal
 		)
 	);
 	StructType * struct_class = (
@@ -423,34 +439,63 @@ static StructType * find_behaviour_base(PyObject * const bases) {
  * compared equal and still took two slots in a set.
  *
  * Ending at the first struct base is exact for one struct base and an
- * approximation for two. With two, C3 can put a later struct base's own __eq__
- * ahead of the mixin -- the mixin is a shared ancestor and is deferred to the
- * tail -- so the class resolves an __eq__ this walk never saw. That is the
- * same "recorded from one base, answered by the MRO" shape the rest of the
- * option handling has, and it is not settled here.
+ * approximation for two or more. With more than one, C3 can put a later struct
+ * base's own __eq__ ahead of the mixin -- the mixin is a shared ancestor and is
+ * deferred to the tail -- so the class resolves an __eq__ this walk never saw,
+ * however many plain struct bases stand in front of it. That is the same
+ * "recorded from one base, answered by the MRO" shape the rest of the option
+ * handling has, and it is not settled here.
  */
 static struct equality_source resolves_body_equality(PyObject * const bases) {
-	/* The two that are not a body's, fetched once rather than per base: they do
-	 * not depend on which base is being asked, and neither lookup can raise. */
-	PY_OWNED(objects, PyObject_GetAttrString((PyObject *) &PyBaseObject_Type, "__eq__"));
-	PY_OWNED(salixs, PyObject_GetAttrString((PyObject *) &StructMixin_Type, "__eq__"));
+	/* Only the first base can end the walk without reading anything: if it is a
+	 * struct its branch answers, and every other case is the co-base walk,
+	 * which is where the cost of looking lives. */
+	if (PyTuple_GET_SIZE(bases) == 0) {
+		return (struct equality_source){.tag = EQUALITY_RESOLVED, .from_a_body = false};
+	}
 
-	if (objects == NULL || salixs == NULL) {
+	PyObject * const first = PyTuple_GET_ITEM(bases, 0);
+
+	return (
+		is_struct_class(
+			first
+		) ? (struct equality_source){
+			.tag = EQUALITY_RESOLVED,
+			.from_a_body = ((StructType *) first)->struct_resolves_body_eq,
+			.needs_derived_not_equal = false,
+		} :
+		equality_from_the_co_bases(bases, 0)
+	);
+}
+
+/* Split out so that the two sentinels are fetched once for the walk and not at
+ * all for a class whose first base is a struct, which is nearly all of them. */
+static struct equality_source equality_from_the_co_bases(
+	PyObject * const bases,
+	Py_ssize_t const first
+) {
+	PyTypeObject * const objects_type = &PyBaseObject_Type;
+	PY_OWNED(objects_equal, PyObject_GetAttrString((PyObject *) objects_type, "__eq__"));
+	PY_OWNED(mixin_equal, PyObject_GetAttrString((PyObject *) &StructMixin_Type, "__eq__"));
+	PY_OWNED(objects_not_equal, PyObject_GetAttrString((PyObject *) objects_type, "__ne__"));
+
+	if (objects_equal == NULL || mixin_equal == NULL || objects_not_equal == NULL) {
 		return (struct equality_source){.tag = EQUALITY_FAILED};
 	}
 
-	for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(bases); ++i) {
+	for (Py_ssize_t i = first; i < PyTuple_GET_SIZE(bases); ++i) {
 		PyObject * const base = PyTuple_GET_ITEM(bases, i);
 
 		if (is_struct_class(base)) {
 			return (struct equality_source){
 				.tag = EQUALITY_RESOLVED,
 				.from_a_body = ((StructType *) base)->struct_resolves_body_eq,
-				.from_a_co_base = false,
+				.needs_derived_not_equal = false,
 			};
 		}
 
-		struct equality_source const answer = base_equality(base, objects, salixs);
+		struct equality_source const answer =
+			base_equality(base, objects_equal, mixin_equal, objects_not_equal);
 
 		if (answer.tag == EQUALITY_FAILED || answer.from_a_body) {
 			return answer;
@@ -472,21 +517,47 @@ static struct equality_source resolves_body_equality(PyObject * const bases) {
  */
 static struct equality_source base_equality(
 	PyObject * const base,
-	PyObject * const objects,
-	PyObject * const salixs
+	PyObject * const objects_equal,
+	PyObject * const mixin_equal,
+	PyObject * const objects_not_equal
 ) {
+	/* One at a time, and each checked before the next is asked for: a lookup
+	 * that raised leaves the exception set, and calling back into the API with
+	 * one pending loses it -- which showed up on 3.10 through 3.12 as
+	 * `_StructMeta returned NULL without setting an exception`. */
 	PY_OWNED(equality, PyObject_GetAttrString(base, "__eq__"));
 
 	if (equality == NULL) {
 		return (struct equality_source){.tag = EQUALITY_FAILED};
 	}
 
-	bool const answered = equality != objects && equality != salixs;
+	PY_OWNED(hashing, PyObject_GetAttrString(base, "__hash__"));
+
+	if (hashing == NULL) {
+		return (struct equality_source){.tag = EQUALITY_FAILED};
+	}
+
+	PY_OWNED(inequality, PyObject_GetAttrString(base, "__ne__"));
+
+	if (inequality == NULL) {
+		return (struct equality_source){.tag = EQUALITY_FAILED};
+	}
+
+	bool const answered = equality != objects_equal && equality != mixin_equal;
+
+	/* A base that is itself unhashable settles the question without answering
+	 * it. Python sets __hash__ to None for a body that defines __eq__ and no
+	 * __hash__, so `__eq__ = object.__eq__` written in a body reads as object's
+	 * here and is a definition all the same. Either way a class deriving from
+	 * an unhashable one is unhashable, and leaving the hash alone is what gets
+	 * that; binding a structural one over it would be salix making a class
+	 * hashable that Python says is not. */
+	bool const refuses_hashing = hashing == Py_None;
 
 	return (struct equality_source){
 		.tag = EQUALITY_RESOLVED,
-		.from_a_body = answered,
-		.from_a_co_base = answered,
+		.from_a_body = answered || refuses_hashing,
+		.needs_derived_not_equal = answered && inequality == objects_not_equal,
 	};
 }
 
@@ -566,7 +637,7 @@ static PyObject * build_class_namespace(
 	bool const frozen_across_bases,
 	bool const body_defines_eq,
 	bool const inherits_body_eq,
-	bool const equality_from_a_co_base
+	bool const derive_not_equal
 ) {
 	PY_OWNED(slots, build_slots(new_names, options.weakref && !has_weakref_slot(base)));
 	PY_MOVABLE(namespace, PyDict_Copy(original_namespace));
@@ -584,7 +655,7 @@ static PyObject * build_class_namespace(
 				frozen_across_bases,
 				body_defines_eq,
 				inherits_body_eq,
-				equality_from_a_co_base
+				derive_not_equal
 			) ==
 			RESULT_OK
 	) {
@@ -655,7 +726,7 @@ static enum result apply_options(
 	bool const frozen_across_bases,
 	bool const body_defines_eq,
 	bool const inherits_body_eq,
-	bool const equality_from_a_co_base
+	bool const derive_not_equal
 ) {
 	/* All six, not just __eq__: they share tp_richcompare, and a class that
 	 * rebinds only some of them gets the dispatching slot with the other source
@@ -674,7 +745,7 @@ static enum result apply_options(
 
 	/* Before the rebind below, which would otherwise put the mixin's __ne__ in
 	 * beside the body's __eq__ for a class that also changed the eq option. */
-	if (bind_not_equal(namespace, body_defines_eq || equality_from_a_co_base) != RESULT_OK) {
+	if (bind_not_equal(namespace, body_defines_eq || derive_not_equal) != RESULT_OK) {
 		return RESULT_ERROR;
 	}
 
