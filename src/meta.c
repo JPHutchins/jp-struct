@@ -22,6 +22,14 @@ struct member_lookup {
 	Py_ssize_t offset;
 };
 
+/* Whether the __eq__ a class resolves came from a class body, and whether the
+ * question could be answered -- asking a base runs whatever its metaclass
+ * defines, so the lookup can raise. */
+struct equality_source {
+	enum { EQUALITY_RESOLVED, EQUALITY_FAILED } tag;
+	bool from_a_body;
+};
+
 static int StructMeta_traverse(PyObject * self, visitproc visit, void * arg);
 static int StructMeta_clear(PyObject * self);
 static void StructMeta_dealloc(PyObject * self);
@@ -36,6 +44,8 @@ static PyObject * build_struct_class(
 );
 static StructType * find_struct_base(PyObject * bases);
 static StructType * find_behaviour_base(PyObject * bases);
+static struct equality_source resolves_body_equality(PyObject * bases);
+static struct equality_source base_equality(PyObject * base);
 static struct options inherited_options(PyObject * bases, StructType const * behaviour);
 static bool any_struct_base_is_mutable(PyObject * bases);
 static bool has_weakref_slot(StructType const * base);
@@ -260,12 +270,20 @@ static PyObject * build_struct_class(
 
 	/* Read before build_class_namespace rebinds anything: afterwards every
 	 * comparison name is present whether the body wrote one or salix did. An
-	 * inherited one survives only if this body leaves equality alone -- and it
-	 * is the behaviour base's, because that is the __eq__ the MRO finds. */
+	 * inherited one survives only if this body leaves equality alone, because a
+	 * class that changes the eq option has salix's binding written into its own
+	 * namespace and that is what the lookup finds first. */
 	bool const body_defines_eq = PyDict_GetItemString(original_namespace, "__eq__") != NULL;
+	struct equality_source const inherited_equality = resolves_body_equality(bases);
+
+	if (inherited_equality.tag == EQUALITY_FAILED) {
+		field_plan_clear(&plan);
+
+		return NULL;
+	}
+
 	bool const inherits_body_eq = (
-		behaviour != NULL &&
-		behaviour->struct_resolves_body_eq &&
+		inherited_equality.from_a_body &&
 		request.options.eq == inherited.eq
 	);
 
@@ -379,6 +397,67 @@ static StructType * find_behaviour_base(PyObject * const bases) {
 	}
 
 	return NULL;
+}
+
+/*
+ * Whether the __eq__ this class will resolve came from a class body, rather
+ * than from the mixin or from object.
+ *
+ * Every base is asked, in the order C3 searches them, and the first whose
+ * branch supplies an __eq__ at all is the answer. A struct base's branch always
+ * supplies one -- the mixin's, or object's where that base opted out of
+ * equality -- so the search stops there and the flag it already stores is the
+ * answer. A non-struct base answers only when it resolves something other than
+ * object's; otherwise it adds nothing to the lookup and the next base decides.
+ *
+ * Asking the struct base alone let a non-struct base ahead of it supply the
+ * equality while salix bound a structural hash beside it, so two instances
+ * compared equal and still took two slots in a set.
+ */
+static struct equality_source resolves_body_equality(PyObject * const bases) {
+	for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(bases); ++i) {
+		PyObject * const base = PyTuple_GET_ITEM(bases, i);
+
+		if (is_struct_class(base)) {
+			return (struct equality_source){
+				.tag = EQUALITY_RESOLVED,
+				.from_a_body = ((StructType *) base)->struct_resolves_body_eq,
+			};
+		}
+
+		struct equality_source const answer = base_equality(base);
+
+		if (answer.tag == EQUALITY_FAILED || answer.from_a_body) {
+			return answer;
+		}
+	}
+
+	return (struct equality_source){.tag = EQUALITY_RESOLVED, .from_a_body = false};
+}
+
+/*
+ * The two __eq__ that are not a body's: object's, which is the absence of one,
+ * and the mixin's, which is salix's own. A base resolving either contributes
+ * nothing a class body wrote, so the next base is what decides.
+ *
+ * The mixin has to be here rather than assumed unreachable, because it is the
+ * only base Struct itself has and its metaclass is plain `type` -- so the
+ * struct-base arm above does not catch it, and counting its __eq__ as a body's
+ * recorded that against Struct and every struct inheriting from it.
+ */
+static struct equality_source base_equality(PyObject * const base) {
+	PY_OWNED(equality, PyObject_GetAttrString(base, "__eq__"));
+	PY_OWNED(objects, PyObject_GetAttrString((PyObject *) &PyBaseObject_Type, "__eq__"));
+	PY_OWNED(salixs, PyObject_GetAttrString((PyObject *) &StructMixin_Type, "__eq__"));
+
+	if (equality == NULL || objects == NULL || salixs == NULL) {
+		return (struct equality_source){.tag = EQUALITY_FAILED};
+	}
+
+	return (struct equality_source){
+		.tag = EQUALITY_RESOLVED,
+		.from_a_body = equality != objects && equality != salixs,
+	};
 }
 
 /*
