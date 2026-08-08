@@ -207,6 +207,14 @@ def test_a_shared_ordered_struct_is_safe_to_compare_while_another_thread_writes_
     often enough. So this pins that ordering keeps working under concurrent
     writes rather than that it would crash without the lock; the crash is pinned
     by the test above, through the helper both paths share.
+
+    `ordered is True` is constant by design and cannot fail in the race
+    direction: floor is below every tuple the writer stores, so a reader that
+    returns a stale but still-above-floor value answers True exactly as a live
+    one does. What it does catch is a read path that raises, or that returns
+    anything other than True. Making the writer straddle floor would not buy the
+    stale case either -- the reader then cannot know which value is current, so
+    it could assert nothing about the result at all.
     """
 
     class Ranked(Struct, frozen=False, order=True):

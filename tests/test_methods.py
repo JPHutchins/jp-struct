@@ -185,11 +185,13 @@ class TestMethods:
         is the class dict, asserted below.
         """
 
-        class Child(self.loose_equality()):
+        Loose = self.loose_equality()
+
+        class Child(Loose):
             y: int = 0
 
         assert (Child(1) == Child(2), Child(1) != Child(2)) == (True, False)
-        assert "__ne__" in vars(self.loose_equality())
+        assert "__ne__" in vars(Loose)
         assert "__ne__" not in vars(Child)
 
     def test_a_body_eq_carries_it_through_an_eq_option_change(self):
@@ -200,6 +202,16 @@ class TestMethods:
         body's __eq__ and bind_not_equal would then skip it -- #58 through the
         other door. Only a class that changes the eq option reaches that rebind
         at all, which is why the tests above cannot see the ordering.
+
+        The two halves are not equal witnesses. OptedBackIn is the one that
+        observes the order; OptedOut answers correctly whichever way round the
+        two run, because `rebind(..., false)` installs object's __ne__ for
+        eq=False anyway. It is here to cover the eq=False direction at all.
+
+        Its answer assertion is what pins that direction -- without the binding
+        the MRO reaches the mixin's structural __ne__ and returns True. The
+        `vars()` assertions below add only *where* the binding sits, which the
+        answers cannot show.
         """
 
         class OptedOut(Struct, eq=False):
@@ -222,6 +234,8 @@ class TestMethods:
 
         assert (OptedOut(1) == OptedOut(2), OptedOut(1) != OptedOut(2)) == (True, False)
         assert (OptedBackIn(1) == OptedBackIn(2), OptedBackIn(1) != OptedBackIn(2)) == (True, False)
+        assert "__ne__" in vars(OptedOut)
+        assert "__ne__" in vars(OptedBackIn)
 
     def test_a_body_ne_is_kept_over_the_derived_one(self):
         """Deriving is what a body that says nothing about != asks for."""
