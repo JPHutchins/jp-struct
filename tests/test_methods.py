@@ -166,19 +166,122 @@ class TestMethods:
         assert hash(first) == hash(Loose(99)) == 0
         assert len({first, second}) == 1
 
-    @pytest.mark.xfail(strict=True, reason="#58: salix keeps the mixin's __ne__")
-    def test_a_body_eq_should_carry_ne_with_it(self):
-        """Asserted as it should be rather than as it is, so the assertion goes
-        green the moment #58 is fixed and strict=True makes that impossible to
-        miss.
+    def test_a_body_eq_carries_ne_with_it(self):
+        """The mixin is a base, so its structural __ne__ is what the lookup
+        found beside a body __eq__ that answered a different question, and
+        `a == b` and `a != b` were both true. #58.
         """
 
         Loose = self.loose_equality()
 
         assert (Loose(1) != Loose(2)) is False
 
+    def test_a_subclass_of_it_derives_ne_the_same_way(self):
+        """A subclass writing nothing about equality inherits both halves.
+
+        A regression guard rather than a proof of where the binding goes: the
+        assertion holds whether the derived __ne__ sits in Loose or in Child,
+        since either inverts the same inherited __eq__. What pins the location
+        is the class dict, asserted below.
+        """
+
+        class Child(self.loose_equality()):
+            y: int = 0
+
+        assert (Child(1) == Child(2), Child(1) != Child(2)) == (True, False)
+        assert "__ne__" in vars(self.loose_equality())
+        assert "__ne__" not in vars(Child)
+
+    def test_a_body_eq_carries_it_through_an_eq_option_change(self):
+        """The order the two rebinds run in, which nothing structural enforces.
+
+        `rebind` skips a name already in the namespace, so a comparison rebind
+        running first would put the mixin's structural __ne__ in beside the
+        body's __eq__ and bind_not_equal would then skip it -- #58 through the
+        other door. Only a class that changes the eq option reaches that rebind
+        at all, which is why the tests above cannot see the ordering.
+        """
+
+        class OptedOut(Struct, eq=False):
+            x: int
+
+            def __eq__(self, other: object) -> bool:
+                return isinstance(other, OptedOut)
+
+            def __hash__(self) -> int:
+                return 0
+
+        class OptedBackIn(OptedOut, eq=True):
+            y: int = 0
+
+            def __eq__(self, other: object) -> bool:
+                return isinstance(other, OptedBackIn)
+
+            def __hash__(self) -> int:
+                return 0
+
+        assert (OptedOut(1) == OptedOut(2), OptedOut(1) != OptedOut(2)) == (True, False)
+        assert (OptedBackIn(1) == OptedBackIn(2), OptedBackIn(1) != OptedBackIn(2)) == (True, False)
+
+    def test_a_body_ne_is_kept_over_the_derived_one(self):
+        """Deriving is what a body that says nothing about != asks for."""
+
+        class Both(Struct):
+            x: int
+
+            def __eq__(self, other: object) -> bool:
+                return isinstance(other, Both)
+
+            def __ne__(self, other: object) -> str:  # type: ignore[override]
+                return "the body's"
+
+            def __hash__(self) -> int:
+                return 0
+
+        assert (Both(1) != Both(2)) == "the body's"
+
+    def test_a_struct_that_leaves_equality_to_salix_is_unaffected(self):
+        """The dict is what says so, not the answers.
+
+        object.__ne__ re-dispatches through the mixin's own tp_richcompare, so
+        a structural struct answers identically whether the binding is there or
+        not -- an unconditional bind_not_equal passes every assertion below the
+        first. The gate is only observable in vars().
+        """
+
+        class Structural(Struct):
+            x: int
+
+        assert "__ne__" not in vars(Structural)
+        assert (Structural(1) != Structural(2), Structural(1) != Structural(1)) == (True, False)
+
+    def test_a_co_base_s_ne_is_shadowed_and_that_is_where_47_lives(self):
+        """Pinned as it is rather than as plain Python has it.
+
+        Binding into the dict puts the derived __ne__ ahead of a co-base's,
+        which plain Python would let win -- there the derived one is the end of
+        the MRO. The mixin's structural __ne__ already displaced a co-base's
+        before this, so what changed is which answer wins; #47 is the issue for
+        a non-struct base's comparison dunders being shadowed.
+        """
+
+        class Taggable:
+            def __ne__(self, other: object) -> str:  # type: ignore[override]
+                return "the co-base's"
+
+        class Mixed(Struct, Taggable):
+            x: int
+
+            def __eq__(self, other: object) -> bool:
+                return isinstance(other, Mixed)
+
+            def __hash__(self) -> int:
+                return 0
+
+        assert (Mixed(1) != Mixed(2)) is False
+
     def test_every_other_construction_derives_ne_from_eq(self):
-        """The parity claim the test above rests on, asserted rather than
+        """The parity claim the tests above rest on, asserted rather than
         described -- this file has been wrong about a sibling's behaviour more
         than once.
         """

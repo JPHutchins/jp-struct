@@ -56,6 +56,7 @@ static enum result apply_options(
 	bool inherits_body_eq
 );
 static enum result rebind(PyObject * namespace, char const * const * names, bool from_mixin);
+static enum result bind_not_equal(PyObject * namespace, bool body_defines_eq);
 static enum result bind_hash(
 	PyObject * namespace,
 	struct options options,
@@ -427,6 +428,12 @@ static enum result apply_options(
 	static char const * const representation[] = {"__repr__", NULL};
 	static char const * const mutability[] = {"__setattr__", "__delattr__", NULL};
 
+	/* Before the rebind below, which would otherwise put the mixin's __ne__ in
+	 * beside the body's __eq__ for a class that also changed the eq option. */
+	if (bind_not_equal(namespace, body_defines_eq) != RESULT_OK) {
+		return RESULT_ERROR;
+	}
+
 	if (options.eq != inherited.eq && rebind(namespace, comparison, options.eq) != RESULT_OK) {
 		return RESULT_ERROR;
 	}
@@ -472,6 +479,28 @@ static enum result rebind(
 	}
 
 	return RESULT_OK;
+}
+
+/*
+ * A body that defines __eq__ gets Python's derived __ne__ with it, the way
+ * every other construction does -- object.__ne__ calls __eq__ and inverts,
+ * unless the body wrote a __ne__ of its own, which rebind leaves alone.
+ *
+ * It has to be bound rather than left to the MRO, because the mixin is a base:
+ * its structural __ne__ is what the lookup finds, and it answers a different
+ * question from the body's __eq__. `a == b` and `a != b` were both true. #58.
+ *
+ * Binding it into the dict also puts it ahead of a __ne__ a *co-base* supplies,
+ * which plain Python would let win -- the derived one is the end of the MRO
+ * there, not the front. That is the same shape as #47, where a non-struct
+ * base's __eq__ shadows the struct base's, and it is left with that issue: the
+ * mixin already discarded a co-base's __ne__ before this, so what changes here
+ * is which answer wins rather than whether the co-base's is heard.
+ */
+static enum result bind_not_equal(PyObject * const namespace, bool const body_defines_eq) {
+	static char const * const not_equal[] = {"__ne__", NULL};
+
+	return body_defines_eq ? rebind(namespace, not_equal, false) : RESULT_OK;
 }
 
 /*
