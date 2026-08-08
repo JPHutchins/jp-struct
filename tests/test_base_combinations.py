@@ -411,9 +411,11 @@ def test_a_frozen_class_that_compares_by_value_hashes_by_value():
         if not (seen.frozen and seen.equality == "value"):
             continue
 
+        one, twin = instance(cls), instance(cls)
+
         if cls.__hash__ is None:
             violations.append(f"{named(bases)}: unhashable")
-        elif hash(instance(cls)) != hash(instance(cls)):
+        elif hash(one) != hash(twin):
             violations.append(f"{named(bases)}: equal instances hash differently")
 
     assert violations == []
@@ -550,13 +552,68 @@ def behaviour_differs_from_the_first_base_alone(
 
 
 def hash_disagreements(combinations: tuple[Combination, ...]) -> list[str]:
-    return [
-        named(bases)
-        for bases, cls in combinations
-        if cls.__hash__ is not None
-        and instance(cls) == instance(cls, 100)
-        and hash(instance(cls)) != hash(instance(cls, 100))
-    ]
+    """Both pairs, because either can be the equal one.
+
+    Two instances built from *differing* arguments are equal only where a body
+    __eq__ says everything is, and two built from the *same* arguments are
+    equal wherever equality reads the fields. Probing only the first left the
+    invariant firing on 111 of 672 sound combinations, and on 87 of those the
+    hash is a constant.
+
+    Both instances of a pair are held while they are compared: hashed one at a
+    time, the first is freed before the second is allocated and the allocator
+    hands back the same address, so an identity hash reads as a matching one.
+    """
+
+    disagreements = []
+
+    for bases, cls in combinations:
+        if cls.__hash__ is None:
+            continue
+
+        for left, right in ((instance(cls), instance(cls)), (instance(cls), instance(cls, 100))):
+            if left == right and hash(left) != hash(right):
+                disagreements.append(named(bases))
+                break
+
+    return disagreements
+
+
+def hashability_disagrees_with_equality(
+    combinations: tuple[Combination, ...],
+) -> list[str]:
+    """Whether a class can be hashed at all must follow the equality it
+    answers with -- identity equality is hashable, value equality is hashable
+    exactly when the value cannot move, and an equality a body supplied brings
+    its own rule.
+
+    The unhashable rule beside this one keys off *observed* value equality, so
+    it steps over a class that records eq=True, is made unhashable for it, and
+    then answers identity because a later base binds `__eq__`. That leaves an
+    identity-comparing class that cannot be put in a set, and nothing said so.
+    """
+
+    violations = []
+
+    for bases, cls in combinations:
+        seen = observe(cls)
+        hashable = cls.__hash__ is not None
+
+        if seen.equality == "identity" and not hashable:
+            violations.append(f"{named(bases)}: identity equality, unhashable")
+        elif seen.equality == "value" and hashable != seen.frozen:
+            violations.append(f"{named(bases)}: value equality, hashable={hashable}")
+
+    return violations
+
+
+def test_hashability_follows_the_equality_the_class_answers_with():
+    assert hashability_disagrees_with_equality(SOUND_EQ) == []
+
+
+@pytest.mark.xfail(strict=True, reason="#76: equality answered by a later base, hash settled from the record")
+def test_hashability_follows_equality_when_a_later_base_answers_it():
+    assert hashability_disagrees_with_equality(CONTESTED_EQ) == []
 
 
 def test_the_repr_is_the_first_struct_bases():
