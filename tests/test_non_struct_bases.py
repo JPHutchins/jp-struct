@@ -216,7 +216,6 @@ def test_equality_and_inequality_agree_when_a_co_base_answers():
 
     assert one == other
     assert (one != other) is False
-    assert (one == other) is not (one != other)
 
 
 def test_a_co_base_supplying_only_a_hash_still_gets_salixs():
@@ -250,9 +249,14 @@ def test_a_base_whose_equality_cannot_be_looked_up_fails_the_class():
     Deciding the hash means reading each non-struct base's `__eq__`, and that
     runs whatever the base put under the name. A descriptor that raises used to
     go unnoticed, because the struct base was the only one consulted; now it
-    stops the class being defined. Propagating beats demoting here -- this
-    class raises from `==` on first use either way -- but it is a class that
-    built before, so it is pinned.
+    stops the class being defined.
+
+    Propagating beats demoting because demoting is a lie about what was
+    learned: a probe that could not look has not found out that the base
+    supplies no equality. It is not that the class is unusable otherwise --
+    demote and it builds with salix's structural equality, ignoring Hostile's
+    entirely, which is worse for being quiet. It is a class that built before,
+    so it is pinned either way.
     """
 
     with pytest.raises(RuntimeError, match="no equality here"):
@@ -325,6 +329,94 @@ def test_a_later_struct_base_answering_equality_is_not_covered_by_this():
         pass
 
     class B(Plain, WithBodyEq):
+        pass
+
+    assert B(1) == B(2)
+    assert hash(B(1)) == hash(B(2))
+
+
+def test_a_co_base_that_paired_them_itself_keeps_its_own_inequality():
+    """The other half of the __ne__ fix, and the half nothing pinned.
+
+    A co-base supplying `__eq__` alone gets object's derived `__ne__` bound
+    over the mixin's structural one. A co-base that wrote both has already
+    paired them, and salix binds nothing -- forcing the flag true keeps every
+    other test in this file green, so without this the guard could go.
+    """
+
+    class Paired_:  # noqa: PLW1641 -- the absent __hash__ is not what is under test
+        def __eq__(self, other: object) -> bool:
+            return True
+
+        def __ne__(self, other: object) -> bool:
+            return True
+
+    class B(Paired_, Base):
+        y: object = 0
+
+    assert B.__ne__ is Paired_.__ne__
+    assert "__ne__" not in vars(B)
+    assert (B(1, 0) == B(2, 0)) is True
+    assert (B(1, 0) != B(2, 0)) is True
+
+
+def test_a_co_base_derived_from_the_mixin_does_not_count_as_having_paired_them():
+    """The mixin is a permitted base, so a co-base can derive from it and still
+    write its own `__eq__`. Its `__ne__` then resolves to the *structural* one,
+    which is the answer being displaced rather than a pairing to leave alone --
+    and reading it as a pairing left `==` and `!=` both true.
+    """
+
+    class FromTheMixin(Struct.__mro__[1]):  # type: ignore[misc,name-defined]  # noqa: PLW1641
+        __slots__ = ()
+
+        def __eq__(self, other: object) -> bool:
+            return True
+
+    class B(FromTheMixin, Base):
+        y: object = 0
+
+    assert (B(1, 0) == B(2, 0)) is True
+    assert (B(1, 0) != B(2, 0)) is False
+
+
+def test_a_co_base_with_a_raising_inequality_beside_a_real_equality_fails_too():
+    """`__ne__` is read only off a base that supplied `__eq__`, so this is the
+    one shape where a name other than `__eq__` can refuse a class. Same trade
+    as the equality probe, pinned so it is not a surprise.
+    """
+
+    class RealEqualityRaisingNotEqual:  # noqa: PLW1641 -- the absent __hash__ is not what is under test
+        def __eq__(self, other: object) -> bool:
+            return True
+
+        __ne__ = Raising()  # type: ignore[assignment]
+
+    with pytest.raises(RuntimeError, match="no equality here"):
+
+        class B(RealEqualityRaisingNotEqual, Base):
+            y: object = 0
+
+
+@pytest.mark.xfail(strict=True, reason="#76: a co-base between two struct bases is not seen")
+def test_a_co_base_between_two_struct_bases_is_not_seen_either():
+    """The same limit as the later-struct-base case, reached by a co-base
+    rather than by a struct one: C3 defers the shared mixin to the tail, so a
+    plain base sitting between two struct bases supplies the equality the class
+    resolves, and the walk ended at the first struct base without seeing it.
+
+    This is #47's own break in a shape that needs two struct bases to reach, so
+    it goes with the rest of #76 rather than here.
+    """
+
+    class Second(Struct):
+        pass
+
+    class Equality:  # noqa: PLW1641 -- the absent __hash__ is not what is under test
+        def __eq__(self, other: object) -> bool:
+            return True
+
+    class B(Second, Equality, Base):
         pass
 
     assert B(1) == B(2)
