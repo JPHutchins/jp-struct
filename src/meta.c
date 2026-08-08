@@ -295,7 +295,9 @@ static PyObject * build_struct_class(
 	bool const body_defines_eq = PyDict_GetItemString(original_namespace, "__eq__") != NULL;
 
 	/* Only asked when the answer can be used, because asking walks the class
-	 * dicts along every co-base's MRO.
+	 * dicts along every co-base's MRO -- and a dict it cannot read is answered
+	 * as a failure, so an unnecessary walk can still refuse a class that would
+	 * otherwise build.
 	 *
 	 * A class that changes the eq option has salix's binding written into its
 	 * own namespace for all six comparison names, and a class whose body writes
