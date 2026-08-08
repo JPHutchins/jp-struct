@@ -55,16 +55,24 @@ def test_a_non_struct_eq_ahead_of_the_struct_base_takes_the_hash_with_it():
         hash(B(1, 0))
 
 
-def test_a_plain_class_behaves_the_same_way():
+def test_a_struct_base_does_not_change_what_the_class_body_asked_for():
     """Not salix's rule but Python's, which is the argument for following it: a
-    body that defines __eq__ and not __hash__ is unhashable, and the struct
-    base does not change what the class body asked for.
+    body that defines __eq__ and not __hash__ is unhashable.
+
+    Stated as a comparison rather than as a fact about `Plain` alone -- on its
+    own that is CPython semantics with no salix in it, and would pass with the
+    package removed. What is worth asserting is that adding a struct base does
+    not change the answer.
     """
 
     class Plain(Equal):
         pass
 
+    class WithAStructBase(Equal, Base):
+        y: object = 0
+
     assert Plain.__hash__ is None
+    assert WithAStructBase.__hash__ is Plain.__hash__
 
 
 def test_a_base_that_pairs_them_keeps_its_pair():
@@ -76,6 +84,7 @@ def test_a_base_that_pairs_them_keeps_its_pair():
         y: object = 0
 
     assert B(1, 0) == B(2, 0)
+    assert (B(1, 0) != B(2, 0)) is False
     assert hash(B(1, 0)) == hash(B(2, 0)) == 7
     assert len({B(1, 0), B(2, 0)}) == 1
 
@@ -182,3 +191,92 @@ def test_a_struct_with_no_co_base_is_untouched():
     assert Mutable.__hash__ is None
     assert Frozen.__hash__ is not None
     assert hash(Frozen(1)) == hash(Frozen(1))
+
+
+def test_equality_and_inequality_agree_when_a_co_base_answers():
+    """The half the first version of this fix left behind: it deferred the
+    hash to the co-base and left `__ne__` resolving to the mixin's structural
+    one, so `a == b` and `a != b` were both true -- #58's shape reached through
+    an inherited __eq__ rather than a body-written one.
+    """
+
+    class B(Equal, Base):
+        y: object = 0
+
+    one, other = B(1, 0), B(2, 0)
+
+    assert one == other
+    assert (one != other) is False
+    assert (one == other) is not (one != other)
+
+
+def test_a_co_base_supplying_only_a_hash_still_gets_salixs():
+    """Deliberate, and the reason is that the pair has to agree.
+
+    `Hashed` supplies no `__eq__`, so the struct base's structural equality is
+    what answers -- and a hash that ignores the fields cannot be the partner of
+    an equality that reads them. salix's own hash is bound over the co-base's
+    for the same reason it is bound at all.
+    """
+
+    class Hashed:
+        __hash__ = 5
+
+    class H(Hashed, Base):
+        y: object = 0
+
+    assert H(1, 0) == H(1, 0)
+    assert H.__hash__ is not Hashed.__hash__
+    assert hash(H(1, 0)) == hash(H(1, 0))
+
+
+def test_a_base_whose_equality_cannot_be_looked_up_fails_the_class():
+    """The cost of asking every base, stated rather than discovered.
+
+    Deciding the hash means reading each non-struct base's `__eq__`, and that
+    runs whatever the base put under the name. A descriptor that raises used to
+    go unnoticed, because the struct base was the only one consulted; now it
+    stops the class being defined. Propagating beats demoting here -- the same
+    class would raise from `==` on first use -- but it is a class that built
+    before, so it is pinned.
+    """
+
+    class Raising:
+        def __get__(self, instance: object, owner: type | None = None) -> object:
+            raise RuntimeError("no equality here")
+
+    class Hostile:  # noqa: PLW1641 -- the __eq__ that raises is the shape
+        __eq__ = Raising()  # type: ignore[assignment]
+
+    with pytest.raises(RuntimeError, match="no equality here"):
+
+        class B(Hostile, Base):
+            y: object = 0
+
+
+@pytest.mark.xfail(strict=True, reason="#76: a later struct base's body __eq__ is not seen")
+def test_a_later_struct_base_answering_equality_is_not_covered_by_this():
+    """The limit of the walk, pinned so the claim above stays honest.
+
+    The search ends at the first struct base, which is exact while there is one
+    of them. With two, C3 puts a later struct base's own `__eq__` ahead of the
+    mixin -- the mixin is a shared ancestor, so it is deferred to the tail --
+    and the class resolves an equality this walk never saw. Structural hash
+    beside a body equality, which is the same break one level over.
+    """
+
+    class WithBodyEq(Base):
+        def __eq__(self, other: object) -> bool:
+            return True
+
+        def __hash__(self) -> int:
+            return 7
+
+    class Plain(Base):
+        pass
+
+    class B(Plain, WithBodyEq):
+        pass
+
+    assert B(1) == B(2)
+    assert hash(B(1)) == hash(B(2))
