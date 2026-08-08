@@ -22,15 +22,15 @@ struct member_lookup {
 	Py_ssize_t offset;
 };
 
-/* Whether the __eq__ a class resolves came from a class body, and whether the
- * question could be answered -- asking a base runs whatever its metaclass
- * defines, so the lookup can raise. */
 /* Whether a name is defined, and whether the dicts could be read at all. */
 struct definition {
 	enum { DEFINITION_READ, DEFINITION_UNREADABLE } tag;
 	bool found;
 };
 
+/* Whether the __eq__ a class resolves came from a class body -- always a
+ * base's, never this class's own, since a body that writes __eq__ is never
+ * asked. */
 struct equality_source {
 	enum { EQUALITY_RESOLVED, EQUALITY_FAILED } tag;
 	bool from_a_body;
@@ -294,9 +294,8 @@ static PyObject * build_struct_class(
 	 * namespace and that is what the lookup finds first. */
 	bool const body_defines_eq = PyDict_GetItemString(original_namespace, "__eq__") != NULL;
 
-	/* Only asked when the answer can be used, because asking means reading
-	 * every co-base's __eq__ -- which runs whatever the co-base put under the
-	 * name and can refuse a class that would otherwise build.
+	/* Only asked when the answer can be used, because asking walks the class
+	 * dicts along every co-base's MRO.
 	 *
 	 * A class that changes the eq option has salix's binding written into its
 	 * own namespace for all six comparison names, and a class whose body writes
@@ -472,7 +471,7 @@ static struct equality_source resolves_body_equality(PyObject * const bases) {
 	);
 }
 
-/* Split out so that the two sentinels are fetched once for the walk and not at
+/* Split out so that the two names are interned once for the walk and not at
  * all for a class whose first base is a struct, which is nearly all of them. */
 static struct equality_source equality_from_the_co_bases(
 	PyObject * const bases,
