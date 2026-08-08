@@ -1007,7 +1007,7 @@ static int defined_in_this_body(
 	PyObject * const field_name,
 	PyObject * const class_name
 ) {
-	if (!PyUnicode_Check(qualname)) {
+	if (qualname == NULL || !PyUnicode_Check(qualname)) {
 		return 0;
 	}
 

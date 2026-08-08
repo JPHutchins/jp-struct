@@ -638,6 +638,18 @@ class TestNameCollisions:
                 def x(self) -> str:
                     return "method"
 
+    def test_a_struct_at_module_scope_is_refused_the_same_way(self):
+        """Every other struct here is nested in a test method, so its methods'
+        qualnames carry a `<locals>.` prefix and only the suffix branch of the
+        rule fires. A class at module scope gives `Collide.x` exactly, which is
+        the common spelling and the branch nothing else reaches.
+        """
+
+        source = "class Collide(Struct):\n    x: int\n\n    def x(self):\n        return 1\n"
+
+        with pytest.raises(TypeError, match=r"'x' is a field.*binds a function"):
+            exec(source, {"Struct": Struct})
+
     def test_a_method_not_named_after_a_field_is_untouched(self):
         """The control. Without it the refusal could be refusing every method
         and these tests would still pass.
@@ -746,6 +758,41 @@ class TestDefaultsThatAreCallable:
             emit: object = print
 
         assert WithBuiltin().emit is print
+
+
+class TestRefusalsWiderThanTheDefect:
+    """Two shapes refused that a body arguably meant as values. Both are pinned
+    rather than argued about, so the over-refusal is visible and a later change
+    to allow either has to update a test deliberately.
+    """
+
+    def test_a_wrapper_object_used_as_a_default_is_refused(self):
+        """The three decorator types answer by type, with no way to tell a body
+        `@staticmethod def y()` from a `staticmethod` object written as a value:
+        both are a `staticmethod` bound under the field's name. Allowing it
+        needs the same `__qualname__` hop through `__func__`, which belongs with
+        the wrapper spellings in the issue below.
+        """
+
+        with pytest.raises(TypeError, match=r"'y' is a field.*binds a staticmethod"):
+
+            class Wrapped(Struct):
+                y: object = staticmethod(module_level_handler)
+
+    def test_a_method_of_a_class_sharing_this_struct_s_name_is_refused(self):
+        """`Elsewhere.handler` has qualname `...Colliding.handler` because the
+        other class is also called `Colliding`, and a qualname carries no way to
+        say whose nesting chain it came from.
+        """
+
+        class Colliding:
+            def handler(self) -> int:
+                return 1
+
+        with pytest.raises(TypeError, match=r"'handler' is a field.*binds a function"):
+
+            class Colliding(Struct):
+                handler: object = Colliding.handler
 
 
 class TestCollisionsStillNotRefused:
