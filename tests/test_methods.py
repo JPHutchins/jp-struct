@@ -1,9 +1,9 @@
 """Methods on a struct, in the shapes people actually write them.
 
 A struct's body is an ordinary class body, and the methods it defines are kept
--- except a name that collides with a field, which is not kept and not simply
-lost either: it becomes that field's default. These are the codec-shaped methods
-that motivate reaching for a struct in the first place -- `to_bytes`,
+-- except a name that collides with a field, which is refused outright rather
+than dropped for the descriptor that reads the field. These are the codec-shaped
+methods that motivate reaching for a struct in the first place -- `to_bytes`,
 `to_string`, a `from_bytes` classmethod -- plus the descriptors that sit
 alongside them, and the dunders that salix would otherwise generate.
 
@@ -531,52 +531,160 @@ class TestBindingsSalixOwns:
         assert Struct.__match_args__ == ()
 
 
-class TestNameCollisions:
-    """A method named after a field is not discarded -- it becomes that field's
-    default, which is worse. `append_declared` reads the class-body value bound
-    to the field name, and a `def` is a class-body value bound to a name.
-
-    So the class builds, `Collide.x` is the slot descriptor, and `Collide()`
-    hands back an instance whose int field holds a function. #54 is the issue.
+def module_level_handler(value: int) -> int:
+    """A function used as a field's default rather than as a method. Module
+    level and named for what it does, which is what separates it from a `def`
+    written in the body under the field's own name.
     """
 
-    @staticmethod
-    def colliding_method():
-        class Collide(Struct):
-            x: int
+    return value
 
-            def x(self) -> str:
-                return "method"
 
-        return Collide
+class TestNameCollisions:
+    """A method named after a field is refused. #54.
 
-    def test_the_method_is_gone_from_the_class(self):
-        Collide = self.colliding_method()
+    It used to be dropped, and dropping it was silent twice over: the class
+    lost a definition its body meant to keep, and `append_declared` read the
+    class-body value bound to the field name as that field's *default*, so
+    `Collide()` built an instance whose int field held a function and
+    `_struct_defaults_` reported it.
 
-        assert type(Collide.x).__name__ == "member_descriptor"
-        assert Collide(1).x == 1
+    salix is stricter than a dataclass or a NamedTuple here, all of which are
+    silent. `TestDefaultsThatAreCallable` is the other half of the rule: a
+    callable is still an ordinary default when it is not named after the field.
+    """
 
-    def test_but_it_became_the_default_and_the_class_is_constructible(self):
-        """The half `Collide(1).x == 1` cannot see. Constructing with no
-        argument is accepted, because the field now has a default.
+    def test_a_def_named_after_a_field_is_refused(self):
+        with pytest.raises(TypeError, match=r"'x' is a field.*binds a function"):
+
+            class Collide(Struct):
+                x: int
+
+                def x(self) -> str:
+                    return "method"
+
+    def test_a_property_named_after_a_field_is_refused(self):
+        with pytest.raises(TypeError, match=r"'y' is a field.*binds a property"):
+
+            class CollideProp(Struct):
+                y: int
+
+                @property
+                def y(self) -> str:
+                    return "property"
+
+    def test_a_classmethod_named_after_a_field_is_refused(self):
+        with pytest.raises(TypeError, match=r"'z' is a field.*binds a classmethod"):
+
+            class CollideClass(Struct):
+                z: int
+
+                @classmethod
+                def z(cls) -> str:
+                    return "classmethod"
+
+    def test_a_staticmethod_named_after_a_field_is_refused(self):
+        with pytest.raises(TypeError, match=r"'w' is a field.*binds a staticmethod"):
+
+            class CollideStatic(Struct):
+                w: int
+
+                @staticmethod
+                def w() -> str:
+                    return "staticmethod"
+
+    def test_the_field_may_be_one_the_base_declared(self):
+        """The original report: colliding with an *inherited* field, with no
+        annotation of its own. The name never reaches `append_declared`, so no
+        default was ever created -- the method was simply dropped in silence,
+        which every alternative also does and salix no longer does.
         """
 
-        Collide = self.colliding_method()
-        (default,) = Collide._struct_defaults_
+        class Base(Struct):
+            x: int
 
-        assert callable(default)
-        assert Collide().x is default
+        with pytest.raises(TypeError, match=r"'x' is a field.*binds a function"):
 
-    def test_a_property_collides_the_same_way(self):
-        class CollideProp(Struct):
-            y: int
+            class Child(Base):
+                def x(self) -> str:
+                    return "method"
 
-            @property
-            def y(self) -> str:
-                return "property"
+    def test_the_message_names_the_remedy(self):
+        with pytest.raises(TypeError, match="rename one of them"):
 
-        (default,) = CollideProp._struct_defaults_
+            class Collide(Struct):
+                x: int
 
-        assert isinstance(default, property)
-        assert CollideProp().y is default
-        assert CollideProp(1).y == 1
+                def x(self) -> str:
+                    return "method"
+
+    def test_a_method_not_named_after_a_field_is_untouched(self):
+        """The control. Without it the refusal could be refusing every method
+        and these tests would still pass.
+        """
+
+        class Fine(Struct):
+            x: int
+
+            def doubled(self) -> int:
+                return self.x * 2
+
+        assert Fine(21).doubled() == 42
+
+
+class TestDefaultsThatAreCallable:
+    """The negative control for #54's refusal, and the reason it asks a
+    function for its name rather than asking whether the value is a descriptor.
+
+    Every one of these is a callable default that works, and a rule keyed on
+    `__get__` would refuse the first two. `functools.partial` is the case that
+    would also have been version-dependent -- it gained `__get__` in 3.13, so a
+    descriptor test would build on 3.10 through 3.12 and refuse from there.
+    """
+
+    def test_a_module_level_function_defaults_a_field(self):
+        class WithHandler(Struct):
+            handler: object = module_level_handler
+
+        assert WithHandler().handler is module_level_handler
+
+    def test_a_lambda_defaults_a_field(self):
+        def identity(value: int) -> int:
+            return value
+
+        class WithLambda(Struct):
+            handler: object = identity
+
+        assert WithLambda().handler is identity
+
+    def test_a_partial_defaults_a_field(self):
+        bound = functools.partial(module_level_handler, 1)
+
+        class WithPartial(Struct):
+            handler: object = bound
+
+        assert WithPartial().handler is bound
+
+    def test_a_bound_method_defaults_a_field(self):
+        class Source:
+            def handle(self, value: int) -> int:
+                return value
+
+        bound = Source().handle
+
+        class WithBound(Struct):
+            handler: object = bound
+
+        assert WithBound().handler is bound
+
+    def test_a_type_defaults_a_field(self):
+        class WithType(Struct):
+            kind: object = int
+
+        assert WithType().kind is int
+
+    def test_a_builtin_defaults_a_field(self):
+        class WithBuiltin(Struct):
+            emit: object = print
+
+        assert WithBuiltin().emit is print
