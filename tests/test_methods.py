@@ -529,11 +529,60 @@ class TestBindingsSalixOwns:
         assert Agreeing(1).x == 1
 
     def test_weakref_may_be_named_because_salix_writes_it(self):
+        """`held` rather than a temporary: `weakref.ref(Weak(1))()` answers None,
+        because the argument is decref'd when the call returns and nothing else
+        holds it. It passes under pytest anyway -- assertion rewriting binds the
+        intermediate to a local -- and fails under `--assert=plain`, so the
+        temporary form would have been green for a reason unrelated to weakref.
+        """
+
         class Weak(Struct, weakref=True):
             x: int
             __slots__ = ("__weakref__", "x")
 
-        assert weakref.ref(Weak(1))() is not None
+        held = Weak(1)
+
+        assert weakref.ref(held)() is held
+
+    def test_naming_weakref_without_asking_for_it_is_refused(self):
+        """salix writes `__weakref__` only for a class that passes
+        `weakref=True`, so without it the entry is one that would be dropped --
+        and dropping it leaves a class that cannot be weak-referenced at all.
+        """
+
+        with pytest.raises(TypeError, match="pass weakref=True instead"):
+
+            class Unasked(Struct):
+                x: int
+                __slots__ = ("__weakref__", "x")
+
+    def test_a_slot_naming_an_inherited_field_is_accepted(self):
+        """Refused when an entry would be lost, and an inherited field's slot is
+        already on the base -- salix writes only this class's new fields, so
+        naming an inherited one loses nothing.
+        """
+
+        class Base(Struct):
+            x: int
+
+        class Child(Base):
+            y: int = 0
+            __slots__ = ("x",)
+
+        assert Child(1).x == 1
+
+    def test_a_non_string_slot_entry_is_refused(self):
+        """Membership would otherwise be decided by `__eq__`, so an object that
+        compares equal to a field name would pass the check and then be dropped
+        by `type.__new__` -- and one whose `__eq__` raises would replace the
+        refusal with its own error.
+        """
+
+        with pytest.raises(TypeError, match="__slots__ items must be strings"):
+
+            class Numbered(Struct):
+                x: int
+                __slots__ = (1,)
 
     def test_a_body_match_args_is_replaced_by_the_fields(self):
         class Matched(Struct):
@@ -555,6 +604,7 @@ class TestBindingsSalixOwns:
         class Matched(Struct, match_args=False):
             x: int
             __match_args__ = ("nope",)
+            __slots__ = ("x",)
 
         class Silent(Struct, match_args=False):
             x: int

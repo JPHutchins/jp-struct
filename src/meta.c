@@ -79,7 +79,11 @@ static PyObject * build_class_namespace(
 	bool inherits_body_eq,
 	bool derive_not_equal
 );
-static enum result refuse_displaced_slots(PyObject * original_namespace, PyObject * new_names);
+static enum result refuse_displaced_slots(
+	PyObject * original_namespace,
+	PyObject * all_names,
+	bool carries_a_weakref_slot
+);
 static PyObject * build_slots(PyObject * new_names, bool weakref);
 static enum result set_match_args(PyObject * namespace, PyObject * all_names, bool wanted);
 static enum result apply_options(
@@ -288,7 +292,14 @@ static PyObject * build_struct_class(
 		return NULL;
 	}
 
-	if (refuse_displaced_slots(original_namespace, plan.new_names) != RESULT_OK) {
+	if (
+		refuse_displaced_slots(
+			original_namespace,
+			plan.all_names,
+			request.options.weakref || has_weakref_slot(base)
+		) !=
+		RESULT_OK
+	) {
 		field_plan_clear(&plan);
 
 		return NULL;
@@ -714,7 +725,8 @@ static PyObject * build_class_namespace(
 
 static enum result refuse_displaced_slots(
 	PyObject * const original_namespace,
-	PyObject * const new_names
+	PyObject * const all_names,
+	bool const carries_a_weakref_slot
 ) {
 	PyObject * const declared = PyDict_GetItemString(original_namespace, "__slots__");
 
@@ -733,17 +745,38 @@ static enum result refuse_displaced_slots(
 
 	for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(entries); ++i) {
 		PyObject * const entry = PyTuple_GET_ITEM(entries, i);
-		int const named_by_a_field = PySequence_Contains(new_names, entry);
+
+		if (!PyUnicode_Check(entry)) {
+			PyErr_Format(
+				PyExc_TypeError,
+				"__slots__ items must be strings, not '%.200s'",
+				Py_TYPE(entry)->tp_name
+			);
+
+			return RESULT_ERROR;
+		}
+
+		if (PyUnicode_CompareWithASCIIString(entry, "__weakref__") == 0) {
+			if (carries_a_weakref_slot) {
+				continue;
+			}
+
+			PyErr_SetString(
+				PyExc_TypeError,
+				"__slots__ names __weakref__, which salix writes only for a class "
+				"that asks for it; pass weakref=True instead"
+			);
+
+			return RESULT_ERROR;
+		}
+
+		int const named_by_a_field = PySequence_Contains(all_names, entry);
 
 		if (named_by_a_field < 0) {
 			return RESULT_ERROR;
 		}
 
 		if (named_by_a_field == 1) {
-			continue;
-		}
-
-		if (PyUnicode_Check(entry) && PyUnicode_CompareWithASCIIString(entry, "__weakref__") == 0) {
 			continue;
 		}
 
