@@ -35,6 +35,9 @@ static PyObject * build_struct_class(
 	PyObject * keywords
 );
 static StructType * find_struct_base(PyObject * bases);
+static StructType * find_behaviour_base(PyObject * bases);
+static struct options inherited_options(PyObject * bases, StructType const * behaviour);
+static bool any_struct_base_is_mutable(PyObject * bases);
 static bool has_weakref_slot(StructType const * base);
 static struct options base_options(StructType const * base);
 static PyObject * build_class_namespace(
@@ -43,6 +46,8 @@ static PyObject * build_class_namespace(
 	PyObject * new_names,
 	struct options options,
 	StructType const * base,
+	struct options inherited,
+	bool frozen_across_bases,
 	bool body_defines_eq,
 	bool inherits_body_eq
 );
@@ -52,6 +57,7 @@ static enum result apply_options(
 	PyObject * namespace,
 	struct options options,
 	struct options inherited,
+	bool frozen_across_bases,
 	bool body_defines_eq,
 	bool inherits_body_eq
 );
@@ -220,7 +226,12 @@ static PyObject * build_struct_class(
 	PyObject * const original_namespace,
 	PyObject * const keywords
 ) {
-	struct options const inherited = base_options(base);
+	/* The behaviour base rather than the layout one: every dunder a struct base
+	 * carries is resolved by the MRO, which takes the first of them, so reading
+	 * the options off anything else makes the record and the behaviour two
+	 * different answers. */
+	StructType const * const behaviour = find_behaviour_base(bases);
+	struct options const inherited = inherited_options(bases, behaviour);
 	struct options_request const request =
 		options_read(keywords, inherited, base != NULL && base->struct_field_count > 0);
 
@@ -236,11 +247,12 @@ static PyObject * build_struct_class(
 
 	/* Read before build_class_namespace rebinds anything: afterwards every
 	 * comparison name is present whether the body wrote one or salix did. An
-	 * inherited one survives only if this body leaves equality alone. */
+	 * inherited one survives only if this body leaves equality alone -- and it
+	 * is the behaviour base's, because that is the __eq__ the MRO finds. */
 	bool const body_defines_eq = PyDict_GetItemString(original_namespace, "__eq__") != NULL;
 	bool const inherits_body_eq = (
-		base != NULL &&
-		base->struct_resolves_body_eq &&
+		behaviour != NULL &&
+		behaviour->struct_resolves_body_eq &&
 		request.options.eq == inherited.eq
 	);
 
@@ -252,6 +264,8 @@ static PyObject * build_struct_class(
 			plan.new_names,
 			request.options,
 			base,
+			inherited,
+			request.options.frozen && any_struct_base_is_mutable(bases),
 			body_defines_eq,
 			inherits_body_eq
 		)
@@ -289,9 +303,60 @@ static PyObject * build_struct_class(
 	return (PyObject *) struct_class;
 }
 
-/* Find the (single) struct base among ``bases``. A fieldless one still carries
- * the options a subclass inherits, so it counts. */
+/*
+ * The struct base this class extends the layout of: the one with the most
+ * fields, which is what CPython settles on as tp_base and so where the slots
+ * and their offsets come from. Taking the first match instead let a fieldless
+ * base stand in front of one with fields, and every field of the second went
+ * missing.
+ *
+ * Fields rather than tp_basicsize, because CPython discounts __weakref__ and
+ * __dict__ when it compares layouts and salix's fields are the only other slots
+ * a struct base adds. Below 3.12 a weakref slot still widens the type, so a
+ * `weakref=True` fieldless base measures exactly as wide as a one-field base
+ * and would win a comparison on size while CPython gave tp_base to the other.
+ *
+ * A fieldless struct base still carries the options a subclass inherits, so it
+ * counts when it is the only one. Two struct bases tie here when one derives
+ * from the other and when both are fieldless; either way the first of them is
+ * also the most derived, which is the one CPython settles on.
+ */
 static StructType * find_struct_base(PyObject * const bases) {
+	StructType * widest = NULL;
+
+	for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(bases); ++i) {
+		PyObject * const base = PyTuple_GET_ITEM(bases, i);
+
+		if (!is_struct_class(base)) {
+			continue;
+		}
+
+		StructType * const candidate = (StructType *) base;
+
+		if (widest == NULL || candidate->struct_field_count > widest->struct_field_count) {
+			widest = candidate;
+		}
+	}
+
+	return widest;
+}
+
+/* What a subclass starts from: the base's options, or the defaults when there
+ * is no struct base to inherit from. */
+static struct options base_options(StructType const * const base) {
+	return base != NULL ? base->struct_options : options_initial();
+}
+
+/*
+ * The struct base whose dunders the MRO will resolve: the first of them.
+ *
+ * Not the layout base: the layout question is where the slots are, and this is
+ * which class answers for the dunders. Answering both with the widest base put
+ * the record and the behaviour into disagreement three separate ways -- a class
+ * recorded frozen that every write succeeded on, an explicit repr=True that
+ * silently no-opped, and equal objects hashing differently.
+ */
+static StructType * find_behaviour_base(PyObject * const bases) {
 	for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(bases); ++i) {
 		PyObject * const base = PyTuple_GET_ITEM(bases, i);
 
@@ -303,10 +368,60 @@ static StructType * find_struct_base(PyObject * const bases) {
 	return NULL;
 }
 
-/* What a subclass starts from: the base's options, or the defaults when there
- * is no struct base to inherit from. */
-static struct options base_options(StructType const * const base) {
-	return base != NULL ? base->struct_options : options_initial();
+/*
+ * What the class starts from: the behaviour base's options, with the two that
+ * are facts about the other bases rather than preferences of that one.
+ *
+ * frozen is a promise every fielded base made separately -- a mutable subclass
+ * hands a writable object to everything holding a reference of any of their
+ * types -- so it is the strongest of them, not the first one's. weakref is a
+ * slot the class has if any base carries one, and recording otherwise would be
+ * the option disagreeing with tp_weaklistoffset.
+ */
+/*
+ * Whether some struct base is mutable, which is the only reason a frozen class
+ * has to bind __setattr__ rather than let the MRO find the mixin's. A mutable
+ * base bound object's on its own transition, and the MRO reaches that binding
+ * before the shared mixin.
+ */
+static bool any_struct_base_is_mutable(PyObject * const bases) {
+	for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(bases); ++i) {
+		PyObject * const base = PyTuple_GET_ITEM(bases, i);
+
+		if (is_struct_class(base) && !((StructType *) base)->struct_options.frozen) {
+			return true;
+		}
+	}
+
+	return false;
+}
+
+static struct options inherited_options(
+	PyObject * const bases,
+	StructType const * const behaviour
+) {
+	struct options const from_behaviour = base_options(behaviour);
+	bool promised_frozen = false;
+
+	for (Py_ssize_t i = 0; i < PyTuple_GET_SIZE(bases); ++i) {
+		PyObject * const base = PyTuple_GET_ITEM(bases, i);
+		StructType const * const struct_base = (StructType *) base;
+
+		promised_frozen |= (
+			is_struct_class(base) &&
+			struct_base->struct_field_count > 0 &&
+			struct_base->struct_options.frozen
+		);
+	}
+
+	return (struct options){
+		.frozen = from_behaviour.frozen || promised_frozen,
+		.eq = from_behaviour.eq,
+		.order = from_behaviour.order,
+		.repr = from_behaviour.repr,
+		.match_args = from_behaviour.match_args,
+		.weakref = from_behaviour.weakref,
+	};
 }
 
 /* CPython refuses a second __weakref__ in a subclass, so an inherited one is
@@ -325,6 +440,8 @@ static PyObject * build_class_namespace(
 	PyObject * const new_names,
 	struct options const options,
 	StructType const * const base,
+	struct options const inherited,
+	bool const frozen_across_bases,
 	bool const body_defines_eq,
 	bool const inherits_body_eq
 ) {
@@ -340,7 +457,8 @@ static PyObject * build_class_namespace(
 		apply_options(
 				namespace,
 				options,
-				base_options(base),
+				inherited,
+				frozen_across_bases,
 				body_defines_eq,
 				inherits_body_eq
 			) ==
@@ -410,6 +528,7 @@ static enum result apply_options(
 	PyObject * const namespace,
 	struct options const options,
 	struct options const inherited,
+	bool const frozen_across_bases,
 	bool const body_defines_eq,
 	bool const inherits_body_eq
 ) {
@@ -434,6 +553,12 @@ static enum result apply_options(
 		return RESULT_ERROR;
 	}
 
+	/* An unchanged option needs no rebinding, because `inherited` is read off
+	 * the first struct base -- the one whose branch of the MRO is searched
+	 * first. That is an approximation: a later struct base binds a dunder its
+	 * own creation transitioned on, and the MRO reaches it before the shared
+	 * mixin, so a second struct base can still answer for a name this class
+	 * never rebound. */
 	if (options.eq != inherited.eq && rebind(namespace, comparison, options.eq) != RESULT_OK) {
 		return RESULT_ERROR;
 	}
@@ -445,8 +570,12 @@ static enum result apply_options(
 		return RESULT_ERROR;
 	}
 
+	/* The exception, and the reason frozen is the only forced one: with more
+	 * than one struct base it can be promised by a base that is not the one
+	 * binding __setattr__, and then the class is recorded frozen while the MRO
+	 * answers with object's and every write succeeds. */
 	if (
-		options.frozen != inherited.frozen &&
+		(options.frozen != inherited.frozen || frozen_across_bases) &&
 		rebind(namespace, mutability, options.frozen) != RESULT_OK
 	) {
 		return RESULT_ERROR;
@@ -488,12 +617,12 @@ static enum result rebind(
  *
  * It has to be bound rather than left to the MRO, because the mixin is a base:
  * its structural __ne__ is what the lookup finds, and it answers a different
- * question from the body's __eq__. `a == b` and `a != b` were both true. #58.
+ * question from the body's __eq__, so `a == b` and `a != b` were both true.
  *
  * Binding it into the dict also puts it ahead of a __ne__ a *co-base* supplies,
  * which plain Python would let win -- the derived one is the end of the MRO
- * there, not the front. That is the same shape as #47, where a non-struct
- * base's __eq__ shadows the struct base's, and it is left with that issue: the
+ * there, not the front. That is the same shape as a non-struct base's __eq__
+ * shadowing the struct base's, and it is left alone for the same reason: the
  * mixin already discarded a co-base's __ne__ before this, so what changes here
  * is which answer wins rather than whether the co-base's is heard.
  */
@@ -638,10 +767,9 @@ static PyTypeObject * winning_metatype(PyTypeObject * const requested, PyObject 
  * where that shows.
  *
  * Refused rather than returned, and rather than installed over: the field table
- * this call planned describes a layout that class may not have. #55 is where
- * the hand-off itself is argued -- until it forwards what it was given, a
- * caller gets an error instead of a class that quietly is not the one asked
- * for.
+ * this call planned describes a layout that class may not have. Until the
+ * hand-off forwards what it was given, a caller gets an error instead of a
+ * class that quietly is not the one asked for.
  */
 static enum result reject_unless_planned(
 	StructType const * const struct_class,
