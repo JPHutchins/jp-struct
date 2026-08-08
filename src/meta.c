@@ -682,12 +682,14 @@ static enum result install_fields(
 	struct_class->struct_resolves_body_eq = resolves_body_eq;
 
 	/* The mixin has no tp_new, because nothing ever needed one: the vectorcall
-	 * allocates. A class that declined it needs the generic one to get as far
-	 * as its own __init__ -- and only such a class, so the mixin itself stays
+	 * allocates. A class that declined it needs one to get as far as its own
+	 * __init__ -- and only such a class, so the mixin itself stays
 	 * uninstantiable and nothing can hold a struct's dunders over an object
-	 * that has no field table. */
+	 * that has no field table. Struct_new rather than PyType_GenericNew,
+	 * because the generic one leaves every slot NULL and the declared defaults
+	 * were then never written by anything. */
 	if (defines_own_init(struct_class)) {
-		struct_class->heap_type.ht_type.tp_new = PyType_GenericNew;
+		struct_class->heap_type.ht_type.tp_new = Struct_new;
 	} else {
 		struct_class->heap_type.ht_type.tp_vectorcall = Struct_vectorcall;
 	}

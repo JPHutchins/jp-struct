@@ -86,6 +86,51 @@ PyObject * Struct_vectorcall(
 }
 
 /*
+ * What a class whose body writes __init__ allocates with. That class declined
+ * the generated constructor, and fill_defaults went with it: a declared default
+ * was never written, for the class and for every subclass, so
+ * __struct_defaults__ advertised a value no instance would ever carry (#56).
+ * Writing them here means the __init__ runs over a struct that already holds
+ * them and overwrites whatever it means to -- which is where a dataclass leaves
+ * them too, on the class, readable.
+ *
+ * Fields with no default are left NULL. Supplying those is what the body's
+ * __init__ is for, and reading one it did not write raises AttributeError as
+ * it did before. __post_init__ is not run here for the same reason: it is the
+ * generated constructor's last step, and this class does not have one.
+ *
+ * The arguments go unread, exactly as PyType_GenericNew left them: they are the
+ * __init__'s to interpret. Which is also what this costs an __init__ that
+ * overwrites every default from its own arguments: the copy is written and
+ * thrown away, because nothing here can know that. fill_defaults can, since the
+ * vectorcall sees which slots the caller filled. Measured on 3.14, a two-field
+ * class whose __init__ assigns both: 115.1ns against 99.9 for
+ * PyType_GenericNew, and a class declaring no defaults pays nothing.
+ */
+PyObject * Struct_new(
+	PyTypeObject * const struct_class,
+	PyObject * const arguments,
+	PyObject * const keywords
+) {
+	PY_MOVABLE(self, struct_class->tp_alloc(struct_class, 0));
+
+	if (self == NULL) {
+		return NULL;
+	}
+
+	StructType const * const type = (StructType *) struct_class;
+
+	/* fill_defaults with nothing supplied, which is what this is: every slot of
+	 * a fresh instance is NULL so its skip never fires, and starting at
+	 * required_count makes its missing-argument branch unreachable. Calling it
+	 * rather than repeating it keeps one copy of what a default costs. */
+	return (
+		fill_defaults(type, self, struct_required_count(type)) == RESULT_OK ? py_move(&self) :
+		NULL
+	);
+}
+
+/*
  * The last thing the constructor does, so what it validates is a struct with
  * every field already written. Frozen means it cannot assign one back --
  * set_field below is the deliberate way through, and the only one, since a

@@ -670,14 +670,15 @@ static PyObject * module_attribute(char const * const module_name, char const * 
  * PyDict_Copy of a defaultdict is a dict. A subclass is shared, as it is
  * there.
  *
- * It over-fires deliberately on a class whose body writes its own __init__.
- * That class displaces the generated constructor, so its declared default is
- * never handed to an instance at all -- and the same is true of every subclass
- * below it. #56 is where the whole question of a dead default belongs, and
- * refusing the same shape everywhere is the answer until it is settled. The
- * message states the rule rather than a consequence for that reason, and names
- * the remedy that still works there: __post_init__ runs from the constructor a
- * body __init__ displaces, so only set_field from that __init__ is left.
+ * It reaches a class whose body writes its own __init__ on the same terms as
+ * every other: Struct_new writes that class's declared defaults before the
+ * __init__ runs, so a non-empty one would be copied per instance and is
+ * shallow there for the same reason. It used to over-fire on a declaration
+ * nothing would ever hand out, which is what #56 was; the message states the
+ * rule rather than a consequence because that reads the same either way, and
+ * names the remedy that still works there: __post_init__ runs from the
+ * constructor a body __init__ displaces, so only set_field from that __init__
+ * is left.
  */
 static enum result reject_unsafe_default(PyObject * const field_name, PyObject * const value) {
 	PyTypeObject * const kind = Py_TYPE(value);
