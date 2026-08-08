@@ -225,11 +225,47 @@ ALONE = {
     shape: built for shape in SHAPES if is_a_class(built := build((shape,)))
 }
 
+# What each shape does on its own, observed once. Every question this file asks
+# of a first base is a question about one of eleven classes, not about 784.
+BEHAVIOUR_ALONE = {shape: observe(built) for shape, built in ALONE.items()}
+ORDERS_ALONE = {shape: seen.order for shape, seen in BEHAVIOUR_ALONE.items()}
+EQUALITY_ALONE = {shape: seen.equality for shape, seen in BEHAVIOUR_ALONE.items()}
+FROZEN_ALONE = {shape: seen.frozen for shape, seen in BEHAVIOUR_ALONE.items()}
+
+
+BUILDABLE = 784
+PYTHON_REFUSES = 316
+
 
 def test_the_sweep_reaches_every_shape_at_both_widths():
     assert {base for bases, _ in ALL for base in bases} == set(SHAPES)
     assert {len(bases) for bases, _ in ALL} == {2, 3}
     assert set(ALONE) == set(SHAPES)
+
+
+def test_the_space_is_the_size_it_has_always_been():
+    """The denominator, pinned -- and the one number in this file that is an
+    expected value rather than an invariant.
+
+    It earns that because it is what every assertion below divides by: a sweep
+    that quietly covers 600 combinations instead of 784 reports the same green
+    as one that covers all of them. The other guards close the two paths that
+    lose combinations *visibly* (a salix refusal, a reworded CPython message);
+    this closes the rest, including a salix message that happens to contain one
+    of the `PYTHONS_OWN` phrases -- salix is a layout library, so `lay-out
+    conflict` is a phrase it could plausibly use itself -- and a future CPython
+    that tightens MRO or layout rules.
+
+    Measured identical on 3.10 through 3.15: 1100 arrangements, 784 salix
+    builds, 316 Python refuses outright. A change here is something to look at
+    rather than to re-baseline: it means the shape of the space moved.
+    """
+
+    impossible = [bases for bases, outcome in OUTCOMES if isinstance(outcome, Impossible)]
+
+    assert len(ALL) == BUILDABLE
+    assert len(impossible) == PYTHON_REFUSES
+    assert len(ALL) + len(impossible) == len(ARRANGEMENTS)
 
 
 def test_salix_refuses_no_arrangement_of_these_shapes():
@@ -333,6 +369,30 @@ def test_a_value_that_compares_by_value_and_can_still_move_is_unhashable():
     assert violations == []
 
 
+def test_a_weakref_slot_on_any_base_reaches_the_class():
+    """The rule `inherited_options` states in prose and nothing asserted: the
+    slot is a fact about every base, not a preference of the first.
+
+    Without it the whole multi-base weakref surface was one strict xfail, which
+    emits a single bit -- so a regression that stopped combinations inheriting
+    the slot would take them *out* of that xfail's violation list and leave it
+    failing exactly as expected, with nothing red. This is the direction that
+    makes the bucket's size mean something.
+    """
+
+    def has_slot(cls: type) -> bool:
+        return cls.__weakrefoffset__ != 0
+
+    violations = [
+        f"{named(bases)}: ref={observe(cls).weakref} slot={has_slot(cls)}"
+        for bases, cls in ALL
+        if observe(cls).weakref != any(has_slot(base) for base in bases)
+        or has_slot(cls) != observe(cls).weakref
+    ]
+
+    assert violations == []
+
+
 def test_a_frozen_promise_is_kept_by_every_arrangement_that_inherits_one():
     """What the class records against what it does, for the one option the
     differential deliberately excludes.
@@ -347,19 +407,17 @@ def test_a_frozen_promise_is_kept_by_every_arrangement_that_inherits_one():
     """
 
     def promised(bases: tuple[type, ...]) -> bool:
-        return any(base.__struct_fields__ and observe(base).frozen for base in bases)
+        return any(base.__struct_fields__ and FROZEN_ALONE[base] for base in bases)
 
-    violations = [
-        f"{named(bases)}: frozen={observe(cls).frozen} against a promise"
-        for bases, cls in ALL
-        if observe(cls).frozen != (observe(ALONE[bases[0]]).frozen or promised(bases))
-    ]
+    violations = []
+
+    for bases, cls in ALL:
+        frozen = observe(cls).frozen
+
+        if frozen != (FROZEN_ALONE[bases[0]] or promised(bases)):
+            violations.append(f"{named(bases)}: frozen={frozen} against a promise")
 
     assert violations == []
-
-
-ORDERS_ALONE = {shape: observe(built).order for shape, built in ALONE.items()}
-EQUALITY_ALONE = {shape: observe(built).equality for shape, built in ALONE.items()}
 
 
 def contested(bases: tuple[type, ...], name: str) -> bool:
@@ -568,6 +626,27 @@ def test_the_frozen_pin_does_not_depend_on_the_order_of_the_bases():
     assert violations == []
 
 
+WITH_A_SLOT = tuple(
+    (bases, cls)
+    for bases, cls in (*ALL, *(((shape,), built) for shape, built in ALONE.items()))
+    if any(base.__weakrefoffset__ != 0 for base in bases)
+)
+
+
+def weakref_requests_ignored(combinations: tuple[Combination, ...]) -> list[str]:
+    """Where `weakref=False` was accepted and then had no effect."""
+
+    ignored = []
+
+    for bases, cls in combinations:
+        without = build((cls,), field="fresh", weakref=False)
+
+        if is_a_class(without) and observe(without).weakref:
+            ignored.append(named(bases))
+
+    return ignored
+
+
 @pytest.mark.xfail(strict=True, reason="#78: weakref is recorded from one base and slotted from another")
 def test_the_weakref_option_and_the_slot_agree():
     """CPython cannot take an inherited `__weakref__` away, so `weakref=False`
@@ -580,18 +659,22 @@ def test_the_weakref_option_and_the_slot_agree():
     turn every other case here red and leave that one passing unexercised.
     """
 
-    violations = []
+    assert weakref_requests_ignored(WITH_A_SLOT) == []
 
-    for bases, cls in (*ALL, *(((shape,), built) for shape, built in ALONE.items())):
-        without = build((cls,), field="fresh", weakref=False)
 
-        if not is_a_class(without):
-            continue
+def test_every_class_carrying_an_inherited_slot_really_does_ignore_the_request():
+    """The bound that gives the xfail above a size, for the same reason the
+    #76 buckets have one: an aggregate `== []` over a bucket where everything
+    already fails flips only on a *complete* fix.
 
-        if observe(without).weakref:
-            violations.append(named(bases))
+    Without this, a partial fix for #78 -- one that refuses `weakref=False` for
+    some arrangements and not others -- shrinks the violation list while the
+    xfail stays failed-as-expected, and so stays green. A refusal makes
+    `is_a_class` false and drops the combination silently; here that shows up
+    as the count no longer matching the bucket.
+    """
 
-    assert violations == []
+    assert len(weakref_requests_ignored(WITH_A_SLOT)) == len(WITH_A_SLOT)
 
 
 def test_a_single_base_asking_to_drop_an_inherited_weakref_slot_is_the_same_bug():
