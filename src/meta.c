@@ -99,6 +99,13 @@ static enum result bind_hash(
 	bool inherits_body_eq
 );
 static enum result drop_class_variables(PyObject * namespace, PyObject * all_names);
+static enum result refuse_colliding_methods(
+	PyObject * original_namespace,
+	PyObject * all_names,
+	PyObject * class_name
+);
+static int defines_a_method(PyObject * bound, PyObject * field_name, PyObject * class_name);
+static int defined_in_this_body(PyObject * qualname, PyObject * field_name, PyObject * class_name);
 static StructType * create_class(
 	PyTypeObject * metatype,
 	PyObject * name,
@@ -284,6 +291,12 @@ static PyObject * build_struct_class(
 	struct field_plan plan = field_plan_build(base, original_namespace);
 
 	if (field_plan_failed(&plan)) {
+		return NULL;
+	}
+
+	if (refuse_colliding_methods(original_namespace, plan.all_names, name) != RESULT_OK) {
+		field_plan_clear(&plan);
+
 		return NULL;
 	}
 
@@ -924,6 +937,102 @@ static enum result drop_class_variables(PyObject * const namespace, PyObject * c
 	}
 
 	return RESULT_OK;
+}
+
+static enum result refuse_colliding_methods(
+	PyObject * const original_namespace,
+	PyObject * const all_names,
+	PyObject * const class_name
+) {
+	for (Py_ssize_t i = 0; i < PyList_GET_SIZE(all_names); ++i) {
+		PyObject * const field_name = PyList_GET_ITEM(all_names, i);
+		PY_OWNED(bound, dict_value_ref(original_namespace, field_name));
+
+		if (bound == NULL) {
+			if (PyErr_Occurred()) {
+				return RESULT_ERROR;
+			}
+
+			continue;
+		}
+
+		int const method = defines_a_method(bound, field_name, class_name);
+
+		if (method < 0) {
+			return RESULT_ERROR;
+		}
+
+		if (method == 1) {
+			PyErr_Format(
+				PyExc_TypeError,
+				"'%U' is a field, and the class body binds a %.100s to that name "
+				"which salix would drop for the descriptor that reads the field; "
+				"rename one of them",
+				field_name,
+				Py_TYPE(bound)->tp_name
+			);
+
+			return RESULT_ERROR;
+		}
+	}
+
+	return RESULT_OK;
+}
+
+static int defines_a_method(
+	PyObject * const bound,
+	PyObject * const field_name,
+	PyObject * const class_name
+) {
+	if (
+		PyObject_TypeCheck(bound, &PyProperty_Type) ||
+		PyObject_TypeCheck(bound, &PyClassMethod_Type) ||
+		PyObject_TypeCheck(bound, &PyStaticMethod_Type)
+	) {
+		return 1;
+	}
+
+	if (!PyFunction_Check(bound)) {
+		return 0;
+	}
+
+	return defined_in_this_body(
+		((PyFunctionObject *) bound)->func_qualname,
+		field_name,
+		class_name
+	);
+}
+
+static int defined_in_this_body(
+	PyObject * const qualname,
+	PyObject * const field_name,
+	PyObject * const class_name
+) {
+	if (qualname == NULL || !PyUnicode_Check(qualname)) {
+		return 0;
+	}
+
+	PY_OWNED(own, PyUnicode_FromFormat("%U.%U", class_name, field_name));
+
+	if (own == NULL) {
+		return -1;
+	}
+
+	int const written_here = PyObject_RichCompareBool(qualname, own, Py_EQ);
+
+	if (written_here != 0) {
+		return written_here;
+	}
+
+	PY_OWNED(nested, PyUnicode_FromFormat(".%U", own));
+
+	if (nested == NULL) {
+		return -1;
+	}
+
+	Py_ssize_t const matched = PyUnicode_Tailmatch(qualname, nested, 0, PY_SSIZE_T_MAX, 1);
+
+	return matched < 0 ? -1 : matched != 0;
 }
 
 static StructType * create_class(
