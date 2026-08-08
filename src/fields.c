@@ -754,7 +754,7 @@ static PyObject * build_defaults(PyObject * const all_names, PyObject * const de
 		 * declaration, so of course it is) and refused there, so the race costs
 		 * the work the first check exists to skip and not the invariant.
 		 *
-		 * `__struct_defaults__` still hands the stored object out, so filling it
+		 * `_struct_defaults_` still hands the stored object out, so filling it
 		 * through there defeats this. That route is out of contract and #51 is
 		 * where the whole type list is argued. */
 		if (reject_unsafe_default(field_name, value) != RESULT_OK) {

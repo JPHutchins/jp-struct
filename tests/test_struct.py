@@ -46,7 +46,7 @@ def test_non_ascii_field_name():
 
     item = MenuItem(café=3)
     assert item.café == 3
-    assert item.__struct_fields__ == ("café",)
+    assert item._struct_fields_ == ("café",)
 
 
 def test_match_args():
@@ -63,15 +63,15 @@ def test_annotations():
 
 
 def test_struct_fields_introspection():
-    assert Point2D(1.0, 2.0).__struct_fields__ == ("x", "y")
-    assert WithDefaults(1).__struct_defaults__ == (2, 3)
+    assert Point2D(1.0, 2.0)._struct_fields_ == ("x", "y")
+    assert WithDefaults(1)._struct_defaults_ == (2, 3)
 
 
 def test_introspection_answers_on_the_class_too():
-    assert Point2D.__struct_fields__ == ("x", "y")
-    assert WithDefaults.__struct_defaults__ == (2, 3)
-    assert Struct.__struct_fields__ == ()
-    assert Struct.__struct_defaults__ == ()
+    assert Point2D._struct_fields_ == ("x", "y")
+    assert WithDefaults._struct_defaults_ == (2, 3)
+    assert Struct._struct_fields_ == ()
+    assert Struct._struct_defaults_ == ()
 
 
 def test_defaults():
@@ -134,7 +134,7 @@ def test_inheritance_extends_fields():
     p = Point3D(1.0, 2.0, 3.0)
     assert (p.x, p.y, p.z) == (1.0, 2.0, 3.0)
     assert Point3D.__match_args__ == ("x", "y", "z")
-    assert p.__struct_fields__ == ("x", "y", "z")
+    assert p._struct_fields_ == ("x", "y", "z")
 
 
 def test_empty_struct():

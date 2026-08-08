@@ -21,6 +21,15 @@ from salix import Struct
 MIXIN = Struct.__mro__[1]
 META = type(Struct)
 
+# Both spellings of both, in one place: two literals drifted apart is a test
+# that silently stops covering a name.
+METADATA_NAMES = (
+    "_struct_fields_",
+    "_struct_defaults_",
+    "__struct_fields__",
+    "__struct_defaults__",
+)
+
 
 class Point(Struct):
     x: int
@@ -136,7 +145,7 @@ class TestAMixinSubclass:
 
         assert impostor.z == 1
 
-    @pytest.mark.parametrize("attribute", ["__struct_fields__", "__struct_defaults__"])
+    @pytest.mark.parametrize("attribute", METADATA_NAMES)
     def test_it_has_no_metadata_to_report(self, impostor, attribute):
         """An AttributeError rather than a TypeError, because that is what the
         two facilities for asking whether an attribute is there catch.
@@ -183,10 +192,10 @@ class TestTheMetaclassWithoutTheMixin:
     def test_calling_it_with_a_struct_base_still_works(self):
         built = META("Extended", (Point,), {"__annotations__": {"y": int}})
 
-        assert built.__struct_fields__ == ("x", "y")
+        assert built._struct_fields_ == ("x", "y")
         assert built(1, 2) == built(1, 2)
 
-    @pytest.mark.parametrize("attribute", ["__struct_fields__", "__struct_defaults__"])
+    @pytest.mark.parametrize("attribute", METADATA_NAMES)
     def test_its_own_metadata_getters_are_never_handed_the_metaclass(self, attribute):
         """They read fields that live past the end of a PyTypeObject, so what
         they are handed has to be an instance of the metaclass -- sized by its
@@ -268,7 +277,7 @@ class TestTheUninstalledClassCannotBeBuilt:
 
         built = types.new_class("S", (Point,), {"metaclass": META})
 
-        assert built.__struct_fields__ == ("x",)
+        assert built._struct_fields_ == ("x",)
         assert built(1) == built(1)
 
 
@@ -280,7 +289,7 @@ class TestAMetaclassSubclass:
         class Delegated(Struct, metaclass=Delegating):
             a: int
 
-        assert Delegated(1).__struct_fields__ == ("a",)
+        assert Delegated(1)._struct_fields_ == ("a",)
         assert type(Delegated) is Delegating
 
     def test_a_keyword_option_survives_the_handoff_to_a_derived_metatype(self):
@@ -374,7 +383,7 @@ class TestAMetaclassSubclass:
         class Statement(Base, order=True):
             y: int = 42
 
-        assert Statement.__struct_fields__ == ("x", "y")
+        assert Statement._struct_fields_ == ("x", "y")
         assert Statement(1).y == 42
         assert Statement(1) < Statement(1, 43)
 

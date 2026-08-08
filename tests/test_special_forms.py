@@ -56,7 +56,7 @@ def test_an_ordinary_annotation_of_the_same_shape_is_untouched():
         a: Final[int] = 1
         b: str | None = None
 
-    assert Ordinary.__struct_fields__ == ("a", "b")
+    assert Ordinary._struct_fields_ == ("a", "b")
 
 
 def test_a_field_named_after_the_form_is_still_a_field():
@@ -66,7 +66,7 @@ def test_a_field_named_after_the_form_is_still_a_field():
         ClassVar: int = 1
         InitVar: int = 2
 
-    assert Named.__struct_fields__ == ("ClassVar", "InitVar")
+    assert Named._struct_fields_ == ("ClassVar", "InitVar")
     assert Named().ClassVar == 1
 
 
@@ -188,7 +188,7 @@ def test_a_name_that_merely_contains_the_form_is_a_field(text):
 
     Ordinary = type(Struct)("Ordinary", (Struct,), {"__annotations__": {"v": text}})
 
-    assert Ordinary.__struct_fields__ == ("v",)
+    assert Ordinary._struct_fields_ == ("v",)
 
 
 def test_re_annotating_an_inherited_field_stays_a_no_op():
@@ -202,7 +202,7 @@ def test_re_annotating_an_inherited_field_stays_a_no_op():
     class Sub(Base):
         x: ClassVar[int]
 
-    assert Sub.__struct_fields__ == ("x",)
+    assert Sub._struct_fields_ == ("x",)
     assert Sub(1).x == 1
 
 
@@ -214,7 +214,7 @@ def test_a_renamed_import_is_not_resolved_in_the_source_text_form():
 
     Escaped = type(Struct)("Escaped", (Struct,), {"__annotations__": {"v": "CV[int]"}})
 
-    assert Escaped.__struct_fields__ == ("v",)
+    assert Escaped._struct_fields_ == ("v",)
 
 
 def test_a_plain_annotated_is_still_a_field():
@@ -227,7 +227,7 @@ def test_a_plain_annotated_is_still_a_field():
         v: Annotated[int, "meta"]
         w: Annotated[list, "meta", "more"]
 
-    assert Tagged.__struct_fields__ == ("v", "w")
+    assert Tagged._struct_fields_ == ("v", "w")
     assert Tagged(1, []).v == 1
 
 
@@ -274,7 +274,7 @@ def test_a_real_future_annotations_module_still_builds_ordinary_fields():
     exec(compile(source, "<future_ordinary>", "exec"), namespace)
     Frame = namespace["Frame"]
 
-    assert Frame.__struct_fields__ == ("length", "tag")  # type: ignore[attr-defined]
+    assert Frame._struct_fields_ == ("length", "tag")  # type: ignore[attr-defined]
     assert Frame(1).tag == "x"  # type: ignore[operator]
 
 
@@ -329,7 +329,7 @@ def test_walking_the_arguments_does_not_widen_what_counts_as_a_form(annotation):
 
     Ordinary = type(Struct)("Ordinary", (Struct,), {"__annotations__": {"v": annotation}})
 
-    assert Ordinary.__struct_fields__ == ("v",)
+    assert Ordinary._struct_fields_ == ("v",)
 
 
 @pytest.mark.skipif(
@@ -352,7 +352,7 @@ def test_the_form_as_annotated_metadata_is_still_a_field_on_the_object_path():
         "Metadata", (Struct,), {"__annotations__": {"v": Annotated[int, ClassVar]}}
     )
 
-    assert Metadata.__struct_fields__ == ("v",)
+    assert Metadata._struct_fields_ == ("v",)
 
 
 @pytest.mark.parametrize(
@@ -415,7 +415,7 @@ def test_a_failing_origin_probe_fails_the_class():
 
     Ordinary = type(Struct)("Ordinary", (Struct,), {"__annotations__": {"v": Quiet()}})
 
-    assert Ordinary.__struct_fields__ == ("v",)
+    assert Ordinary._struct_fields_ == ("v",)
 
 
 def test_an_annotation_that_rewrites_the_annotations_does_not_take_the_walk_with_it():
@@ -445,7 +445,7 @@ def test_an_annotation_that_rewrites_the_annotations_does_not_take_the_walk_with
 
     Built = type(Struct)("Rewritten", (Struct,), {"__annotations__": annotations})
 
-    assert Built.__struct_fields__ == ("first", "last")
+    assert Built._struct_fields_ == ("first", "last")
 
 
 @pytest.mark.skipif(sys.version_info < (3, 12), reason="PEP 695 `type` is a syntax error before 3.12")
@@ -488,7 +488,7 @@ def test_a_pep_695_alias_to_something_else_is_still_a_field():
         "Ordinary", (Struct,), {"__annotations__": {"v": namespace["Aliased"]}}
     )
 
-    assert Ordinary.__struct_fields__ == ("v",)
+    assert Ordinary._struct_fields_ == ("v",)
 
 
 def test_a_str_injected_during_the_walk_is_matched_rather_than_crashing():
@@ -542,5 +542,5 @@ def test_the_object_path_is_skipped_when_neither_module_is_loaded(monkeypatch):
 
     Ordinary = type(Struct)("Ordinary", (Struct,), {"__annotations__": {"v": Watched()}})
 
-    assert Ordinary.__struct_fields__ == ("v",)
+    assert Ordinary._struct_fields_ == ("v",)
     assert probed == []

@@ -131,17 +131,30 @@ PyTypeObject StructMeta_Type = {
 
 /* The mixin answers these for an instance; the metaclass answers the same
  * questions of the class, which is where msgspec puts them and so where a
- * reader looks first. */
+ * reader looks first. Both spellings, for the reason src/mixin.c gives: the
+ * sunder is salix's, and the dunder is msgspec's name honoured rather than a
+ * dunder of salix's own invention. Unlike the mixin's, these getters need no
+ * name of their own -- there is no non-struct for them to refuse. */
 static PyGetSetDef StructMeta_getset[] = {
 	{
-		.name = "__struct_fields__",
+		.name = "_struct_fields_",
 		.get = StructMeta_get_field_names,
 		.doc = "tuple of field names",
 	},
 	{
-		.name = "__struct_defaults__",
+		.name = "_struct_defaults_",
 		.get = StructMeta_get_defaults,
 		.doc = "tuple of trailing defaults",
+	},
+	{
+		.name = "__struct_fields__",
+		.get = StructMeta_get_field_names,
+		.doc = "tuple of field names, under msgspec's name for it",
+	},
+	{
+		.name = "__struct_defaults__",
+		.get = StructMeta_get_defaults,
+		.doc = "tuple of trailing defaults, under msgspec's name for it",
 	},
 	{.name = NULL},
 };

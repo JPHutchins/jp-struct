@@ -35,7 +35,7 @@ def test_a_hand_written_annotate_is_called_directly():
 
     Manual = type(Struct)("Manual", (Struct,), {"__annotate__": annotate})
 
-    assert Manual.__struct_fields__ == ("x", "y")
+    assert Manual._struct_fields_ == ("x", "y")
     assert Manual(1, 2).x == 1
 
 
@@ -100,7 +100,7 @@ class TestANonFunctionAnnotate:
 
         Built = type(Struct)("Built", (Struct,), {"__annotate__": Annotate()})
 
-        assert Built.__struct_fields__ == ("x", "y")
+        assert Built._struct_fields_ == ("x", "y")
         assert Built(1, 2).y == 2
 
     @pytest.mark.skipif(
@@ -128,7 +128,7 @@ class TestANonFunctionAnnotate:
 
         Built = type(Struct)("Built", (Struct,), {"__annotate__": fake_globals_aware})
 
-        assert Built.__struct_fields__ == ("x", "y")
+        assert Built._struct_fields_ == ("x", "y")
         assert Built(1, 2).y == 2
 
     @pytest.mark.skipif(
@@ -155,7 +155,7 @@ class TestANonFunctionAnnotate:
 
         Built = type(Struct)("Built", (Struct,), {"__annotate__": inconsistent})
 
-        assert Built.__struct_fields__ == ("answered_3",)
+        assert Built._struct_fields_ == ("answered_3",)
 
     @pytest.mark.skipif(
         sys.version_info < (3, 14),
@@ -255,7 +255,7 @@ class TestANonFunctionAnnotate:
 
         Built = type(Struct)("Built", (Struct,), {"__annotate__": functools.partial(annotate)})
 
-        assert Built.__struct_fields__ == ("z",)
+        assert Built._struct_fields_ == ("z",)
         assert Built(1).z == 1
 
 
@@ -269,14 +269,14 @@ class TestForwardReferences:
             value: int
             nxt: Node = None  # noqa: F821
 
-        assert Node.__struct_fields__ == ("value", "nxt")
+        assert Node._struct_fields_ == ("value", "nxt")
         assert Node(1, Node(2)).nxt.value == 2
 
     def test_an_annotation_that_never_resolves_is_a_field_anyway(self):
         class Bare(Struct):
             x: NeverDefined  # noqa: F821
 
-        assert Bare.__struct_fields__ == ("x",)
+        assert Bare._struct_fields_ == ("x",)
         assert Bare(1).x == 1
 
     def test_two_classes_may_refer_to_each_other(self):
@@ -294,7 +294,7 @@ class TestForwardReferences:
             second: Unresolvable  # noqa: F821
             third: str
 
-        assert Mixed.__struct_fields__ == ("first", "second", "third")
+        assert Mixed._struct_fields_ == ("first", "second", "third")
 
     def test_a_subclass_may_forward_reference_too(self):
         class Base(Struct):
@@ -303,7 +303,7 @@ class TestForwardReferences:
         class Child(Base):
             y: Child = None  # noqa: F821
 
-        assert Child.__struct_fields__ == ("x", "y")
+        assert Child._struct_fields_ == ("x", "y")
 
     def test_the_annotations_still_resolve_once_the_class_exists(self):
         """Reading them early does not leave a ForwardRef behind for everyone else."""
@@ -352,7 +352,7 @@ class TestForwardReferences:
         class Deferred(Struct):
             x: helper()
 
-        assert Deferred.__struct_fields__ == ("x",)
+        assert Deferred._struct_fields_ == ("x",)
 
     def test_a_forged_name_attribute_reads_as_a_forward_reference(self):
         """The discriminator asks whether `.name` is set, and the keyword form
@@ -367,7 +367,7 @@ class TestForwardReferences:
         class Built(Struct):
             v: forged()
 
-        assert Built.__struct_fields__ == ("v",)
+        assert Built._struct_fields_ == ("v",)
 
     def test_the_exemption_is_order_dependent(self):
         """The rescue is all-or-nothing: it re-evaluates every annotation and
@@ -383,7 +383,7 @@ class TestForwardReferences:
             x: Missing  # noqa: F821
             y: boom()
 
-        assert Rescued.__struct_fields__ == ("x", "y")
+        assert Rescued._struct_fields_ == ("x", "y")
 
         with pytest.raises(NameError, match="boom"):
 
@@ -413,7 +413,7 @@ class TestForwardReferences:
             a: counted()
             b: Missing  # noqa: F821
 
-        assert Mixed.__struct_fields__ == ("a", "b")
+        assert Mixed._struct_fields_ == ("a", "b")
         assert len(evaluations) > 1
 
     def test_a_raised_NameError_is_arbitrary_failure_too(self):
@@ -448,7 +448,7 @@ class TestForwardReferences:
         class Deferred(Struct):
             x: Unresolvable + 1  # noqa: F821
 
-        assert Deferred.__struct_fields__ == ("x",)
+        assert Deferred._struct_fields_ == ("x",)
         assert Deferred(1).x == 1
 
 

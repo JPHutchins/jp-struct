@@ -123,7 +123,7 @@ def test_a_shared_struct_is_safe_to_read_from_every_thread():
     def work():
         for _ in range(ITERATIONS):
             assert shared.x == 1
-            assert shared.__struct_fields__ == ("x", "y")
+            assert shared._struct_fields_ == ("x", "y")
 
     run_on_every_thread(work)
 

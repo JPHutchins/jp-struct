@@ -15,7 +15,7 @@ def test_a_subclass_appends_its_own_fields():
         z: int
 
     assert Extended.__match_args__ == ("x", "y", "z")
-    assert Extended(1, 2, 3).__struct_fields__ == ("x", "y", "z")
+    assert Extended(1, 2, 3)._struct_fields_ == ("x", "y", "z")
 
 
 def test_an_inherited_field_keeps_its_position():
@@ -33,7 +33,7 @@ def test_inherited_defaults_carry_over():
     class Extended(WithDefault):
         c: int = 8
 
-    assert Extended(1).__struct_defaults__ == (7, 8)
+    assert Extended(1)._struct_defaults_ == (7, 8)
     assert (Extended(1).b, Extended(1).c) == (7, 8)
 
 
@@ -43,7 +43,7 @@ def test_a_subclass_may_give_an_inherited_field_a_default():
 
     assert Defaulted(1).y == 5
     assert Defaulted.__match_args__ == ("x", "y")
-    assert Defaulted(1).__struct_fields__ == ("x", "y")
+    assert Defaulted(1)._struct_fields_ == ("x", "y")
 
 
 def test_a_redefaulted_inherited_field_is_not_shadowed_by_its_class_variable():
@@ -96,7 +96,7 @@ def test_a_class_with_no_annotations_is_transparent():
     class Bottom(Middle):
         z: int
 
-    assert Bottom(1, 2, 3).__struct_fields__ == ("x", "y", "z")
+    assert Bottom(1, 2, 3)._struct_fields_ == ("x", "y", "z")
 
 
 def test_a_deep_chain_accumulates_in_order():
@@ -105,12 +105,12 @@ def test_a_deep_chain_accumulates_in_order():
     for name in ("p", "q", "r"):
         current = type(current)(f"Level_{name}", (current,), {"__annotations__": {name: int}})
 
-    assert current(1, 2, 3, 4, 5).__struct_fields__ == ("x", "y", "p", "q", "r")
+    assert current(1, 2, 3, 4, 5)._struct_fields_ == ("x", "y", "p", "q", "r")
 
 
 def test_the_base_itself_has_no_fields():
-    assert Struct().__struct_fields__ == ()
-    assert Struct().__struct_defaults__ == ()
+    assert Struct()._struct_fields_ == ()
+    assert Struct()._struct_defaults_ == ()
 
 
 def test_two_field_bearing_bases_are_rejected():
@@ -132,5 +132,5 @@ def test_a_fieldless_second_base_is_allowed():
     class Combined(Base, Marker):
         z: int
 
-    assert Combined(1, 2, 3).__struct_fields__ == ("x", "y", "z")
+    assert Combined(1, 2, 3)._struct_fields_ == ("x", "y", "z")
     assert isinstance(Combined(1, 2, 3), Marker)

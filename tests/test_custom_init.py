@@ -47,7 +47,7 @@ def test_the_signature_is_the_body_s():
 
 
 def test_the_struct_machinery_is_otherwise_untouched():
-    assert Handwritten.__struct_fields__ == ("x", "y")
+    assert Handwritten._struct_fields_ == ("x", "y")
     assert Handwritten.__match_args__ == ("x", "y")
     assert repr(Handwritten(7)) == "Handwritten(x=7, y=7)"
     assert Handwritten(7) == Generated(7, 7)
@@ -101,7 +101,7 @@ def test_defaults_are_written_before_a_body_init_runs():
     """What the class declared, the instance carries.
 
     The declaration used to be inert: the vectorcall filled defaults and this
-    class declined it, so `__struct_defaults__` advertised a value no instance
+    class declined it, so `_struct_defaults_` advertised a value no instance
     would ever have. tp_new writes them now, which is where a dataclass leaves
     them readable too.
     """

@@ -100,16 +100,41 @@ def set_field_will_not_take_keywords() -> None:
 
 
 def the_field_names_may_not_be_assigned_on_the_class() -> None:
-    Point.__struct_fields__ = ("z",)  # type: ignore[misc]
+    Point._struct_fields_ = ("z",)  # type: ignore[misc]
 
 
 def the_defaults_may_not_be_assigned_on_the_class() -> None:
-    Point.__struct_defaults__ = (9,)  # type: ignore[misc]
+    Point._struct_defaults_ = (9,)  # type: ignore[misc]
 
 
 def the_field_names_may_not_be_assigned_on_an_instance() -> None:
-    Point(1, "two").__struct_fields__ = ("z",)  # type: ignore[misc]
+    Point(1, "two")._struct_fields_ = ("z",)  # type: ignore[misc]
 
 
 def the_defaults_may_not_be_assigned_on_an_instance() -> None:
+    Point(1, "two")._struct_defaults_ = (9,)  # type: ignore[misc]
+
+
+def msgspec_names_for_them_may_not_be_assigned_either() -> None:
+    Point.__struct_fields__ = ("z",)  # type: ignore[misc]
+    Point.__struct_defaults__ = (9,)  # type: ignore[misc]
+    Point(1, "two").__struct_fields__ = ("z",)  # type: ignore[misc]
     Point(1, "two").__struct_defaults__ = (9,)  # type: ignore[misc]
+
+
+class AFieldMayNotTakeOneOfTheMetadataNames(Struct):
+    """Declaring the four names Final is what makes a checker refuse them as
+    field names, and that refusal is deliberate rather than a side effect.
+
+    The runtime still builds this class -- #82 is the decision about whether it
+    should -- and until that is settled the two answers differ: a checker says
+    no and salix says yes. The direction is the safe one, since the class it
+    builds reports the metadata when read from the class and the field when
+    read from an instance, so the refusal here is the reservation being real
+    somewhere. Stated in this file so that it is checked rather than assumed.
+    """
+
+    _struct_fields_: int  # type: ignore[assignment,misc]
+    _struct_defaults_: int  # type: ignore[assignment,misc]
+    __struct_fields__: int  # type: ignore[assignment,misc]
+    __struct_defaults__: int  # type: ignore[assignment,misc]
